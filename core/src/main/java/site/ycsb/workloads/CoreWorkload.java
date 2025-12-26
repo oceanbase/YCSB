@@ -251,6 +251,26 @@ public class CoreWorkload extends Workload {
   public static final String READMODIFYWRITE_PROPORTION_PROPERTY_DEFAULT = "0.0";
 
   /**
+   * The name of the property for the proportion of transactions that are batch put.
+   */
+  public static final String BATCH_PUT_PROPORTION_PROPERTY = "batchputproportion";
+
+  /**
+   * The default proportion of transactions that are batch put. 
+   */
+  public static final String BATCH_PUT_PROPORTION_PROPERTY_DEFAULT = "0.0";
+
+  /**
+   * The name of the property for the proportion of transactions that are batch read.
+   */
+  public static final String BATCH_READ_PROPORTION_PROPERTY = "batchreadproportion";
+
+  /**
+   * The default proportion of transactions that are batch read.
+   */
+  public static final String BATCH_READ_PROPORTION_PROPERTY_DEFAULT = "0.0";
+
+  /**
    * The name of the property for the the distribution of requests across the keyspace. Options are
    * "uniform", "zipfian" and "latest"
    */
@@ -356,6 +376,18 @@ public class CoreWorkload extends Workload {
    */
   public static final String FIELD_NAME_PREFIX_DEFAULT = "field";
 
+  /**
+   * The name of the property for the batch size of each batch put operation.
+   */
+  public static final String BATCH_PUT_SIZE_PER_OP = "batchput.size.per.op";
+  public static final String BATCH_PUT_SIZE_PER_OP_DEFAULT = "10";
+
+  /**
+   * The name of the property for batch_size of each batch read operation.
+   */
+  public static final String BATCH_READ_SIZE_PER_OP = "batchread.size.per.op";
+  public static final String BATCH_READ_SIZE_PER_OP_DEFAULT = "10";
+
   protected NumberGenerator keysequence;
   protected DiscreteGenerator operationchooser;
   protected NumberGenerator keychooser;
@@ -365,19 +397,23 @@ public class CoreWorkload extends Workload {
   protected boolean orderedinserts;
   protected long fieldcount;
   protected long recordcount;
+  protected long insertstart;
+  protected long insertcount;
   protected int zeropadding;
   protected int insertionRetryLimit;
   protected int insertionRetryInterval;
+  protected int batchPutSize;
+  protected int batchReadSize;
 
   private Measurements measurements = Measurements.getMeasurements();
 
-  public static String buildKeyName(long keynum, int zeropadding, boolean orderedinserts) {
+  public String buildKeyName(long keynum) {
     if (!orderedinserts) {
-      keynum = Utils.hash(keynum);
+      keynum = Utils.hash(keynum) % recordcount;
     }
     String value = Long.toString(keynum);
     int fill = zeropadding - value.length();
-    String prekey = "user";
+    String prekey = "";
     for (int i = 0; i < fill; i++) {
       prekey += '0';
     }
@@ -445,9 +481,9 @@ public class CoreWorkload extends Workload {
     String scanlengthdistrib =
         p.getProperty(SCAN_LENGTH_DISTRIBUTION_PROPERTY, SCAN_LENGTH_DISTRIBUTION_PROPERTY_DEFAULT);
 
-    long insertstart =
+    insertstart =
         Long.parseLong(p.getProperty(INSERT_START_PROPERTY, INSERT_START_PROPERTY_DEFAULT));
-    long insertcount=
+    insertcount =
         Long.parseLong(p.getProperty(INSERT_COUNT_PROPERTY, String.valueOf(recordcount - insertstart)));
     // Confirm valid values for insertstart and insertcount in relation to recordcount
     if (recordcount < (insertstart + insertcount)) {
@@ -545,6 +581,8 @@ public class CoreWorkload extends Workload {
         INSERTION_RETRY_LIMIT, INSERTION_RETRY_LIMIT_DEFAULT));
     insertionRetryInterval = Integer.parseInt(p.getProperty(
         INSERTION_RETRY_INTERVAL, INSERTION_RETRY_INTERVAL_DEFAULT));
+    batchPutSize = Integer.parseInt(p.getProperty(BATCH_PUT_SIZE_PER_OP, BATCH_PUT_SIZE_PER_OP_DEFAULT));
+    batchReadSize = Integer.parseInt(p.getProperty(BATCH_READ_SIZE_PER_OP, BATCH_READ_SIZE_PER_OP_DEFAULT));
   }
 
   /**
@@ -611,16 +649,39 @@ public class CoreWorkload extends Workload {
    */
   @Override
   public boolean doInsert(DB db, Object threadstate) {
-    int keynum = keysequence.nextValue().intValue();
-    String dbkey = CoreWorkload.buildKeyName(keynum, zeropadding, orderedinserts);
-    HashMap<String, ByteIterator> values = buildValues(dbkey);
+    final Map<String, Map<String, ByteIterator>> valuesMap = new HashMap<>();
 
+    int batchSize = batchPutSize;
+    if (batchSize < 1) {
+      batchSize = 1;
+    }
+
+    for (int i = 0; i < batchSize; i++) {
+      final long keynum = keysequence.nextValue().longValue();
+      final String dbkey = buildKeyName(keynum);
+      final HashMap<String, ByteIterator> values = buildValues(dbkey);
+      valuesMap.put(dbkey, values);
+    }
+
+    // No more records for this client instance.
+    if (valuesMap.isEmpty()) {
+      return false;
+    }
+
+    // Try batchPut with the same retry policy as single inserts.
     Status status;
     int numOfRetries = 0;
     do {
-      status = db.insert(table, dbkey, values);
-      if (null != status && status.isOk()) {
+      try {
+        status = db.batchPut(table, valuesMap);
+      } catch (RuntimeException e) {
+        // If the binding doesn't implement batchPut, fall back to single inserts.
+        status = Status.ERROR;
         break;
+      }
+
+      if (null != status && status.isOk()) {
+        return true;
       }
       // Retry if configured. Without retrying, the load process will fail
       // even if one single insertion fails. User can optionally configure
@@ -634,16 +695,42 @@ public class CoreWorkload extends Workload {
         } catch (InterruptedException e) {
           break;
         }
-
       } else {
         System.err.println("Error inserting, not retrying any more. number of attempts: " + numOfRetries +
             "Insertion Retry Limit: " + insertionRetryLimit);
         break;
-
       }
     } while (true);
 
-    return null != status && status.isOk();
+    // Fallback path: insert records one-by-one (also with retry).
+    for (final Map.Entry<String, Map<String, ByteIterator>> e : valuesMap.entrySet()) {
+      Status s;
+      numOfRetries = 0;
+      do {
+        s = db.insert(table, e.getKey(), e.getValue());
+        if (null != s && s.isOk()) {
+          break;
+        }
+        if (++numOfRetries <= insertionRetryLimit) {
+          System.err.println("Retrying insertion, retry count: " + numOfRetries);
+          try {
+            int sleepTime = (int) (1000 * insertionRetryInterval * (0.8 + 0.4 * Math.random()));
+            Thread.sleep(sleepTime);
+          } catch (InterruptedException ex) {
+            break;
+          }
+        } else {
+          System.err.println("Error inserting, not retrying any more. number of attempts: " + numOfRetries +
+              "Insertion Retry Limit: " + insertionRetryLimit);
+          break;
+        }
+      } while (true);
+
+      if (null == s || !s.isOk()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -671,6 +758,12 @@ public class CoreWorkload extends Workload {
       break;
     case "SCAN":
       doTransactionScan(db);
+      break;
+    case "BATCH_PUT":
+      doTransactionBatchPut(db);
+      break;
+    case "BATCH_READ":
+      doTransactionBatchRead(db);
       break;
     default:
       doTransactionReadModifyWrite(db);
@@ -723,7 +816,7 @@ public class CoreWorkload extends Workload {
     // choose a random key
     long keynum = nextKeynum();
 
-    String keyname = CoreWorkload.buildKeyName(keynum, zeropadding, orderedinserts);
+    String keyname = buildKeyName(keynum);
 
     HashSet<String> fields = null;
 
@@ -750,7 +843,7 @@ public class CoreWorkload extends Workload {
     // choose a random key
     long keynum = nextKeynum();
 
-    String keyname = CoreWorkload.buildKeyName(keynum, zeropadding, orderedinserts);
+    String keyname = buildKeyName(keynum);
 
     HashSet<String> fields = null;
 
@@ -797,7 +890,7 @@ public class CoreWorkload extends Workload {
     // choose a random key
     long keynum = nextKeynum();
 
-    String startkeyname = CoreWorkload.buildKeyName(keynum, zeropadding, orderedinserts);
+    String startkeyname = buildKeyName(keynum);
 
     // choose a random scan length
     int len = scanlength.nextValue().intValue();
@@ -823,7 +916,7 @@ public class CoreWorkload extends Workload {
     // choose a random key
     long keynum = nextKeynum();
 
-    String keyname = CoreWorkload.buildKeyName(keynum, zeropadding, orderedinserts);
+    String keyname = buildKeyName(keynum);
 
     HashMap<String, ByteIterator> values;
 
@@ -843,7 +936,7 @@ public class CoreWorkload extends Workload {
     long keynum = transactioninsertkeysequence.nextValue();
 
     try {
-      String dbkey = CoreWorkload.buildKeyName(keynum, zeropadding, orderedinserts);
+      String dbkey = buildKeyName(keynum);
 
       HashMap<String, ByteIterator> values = buildValues(dbkey);
       db.insert(table, dbkey, values);
@@ -851,6 +944,51 @@ public class CoreWorkload extends Workload {
       transactioninsertkeysequence.acknowledge(keynum);
     }
   }
+
+  public void doTransactionBatchPut(DB db) {
+    Map<String,Map<String,ByteIterator>> valuesMap = new HashMap<>();
+    List<Long> keyList = new ArrayList<>();
+    try {
+      for (int i = 0; i < batchPutSize; i++) {
+        // choose the next key
+        long keyNum = transactioninsertkeysequence.nextValue();
+        String dbKey = buildKeyName(keyNum);
+        HashMap<String, ByteIterator> values = buildValues(dbKey);
+        valuesMap.put(dbKey,values);
+        keyList.add(keyNum);
+      }
+      db.batchPut(table, valuesMap);
+    } finally {
+      for (Long keyNum : keyList) {
+        transactioninsertkeysequence.acknowledge(keyNum);
+      }
+    }
+  }
+
+  public void doTransactionBatchRead(DB db) {
+    HashSet<String> fields = null;
+    if (!readallfields) {
+      // read a random field
+      String fieldname = fieldnames.get(fieldchooser.nextValue().intValue());
+
+      fields = new HashSet<String>();
+      fields.add(fieldname);
+    } else if (dataintegrity) {
+      // pass the full field list if dataintegrity is on for verification
+      fields = new HashSet<String>(fieldnames);
+    }
+
+    Map<String,Map<String,ByteIterator>> valuesMap = new HashMap<>();
+    for (int i = 0; i < batchReadSize; i++) {
+      // choose the next key
+      long keynum = nextKeynum();
+      String dbKey = buildKeyName(keynum);
+      HashMap<String, ByteIterator> values = new HashMap<>();
+      valuesMap.put(dbKey,values);
+    }
+    db.batchRead(table, fields, valuesMap);
+  }
+
 
   /**
    * Creates a weighted discrete values with database operations for a workload to perform.
@@ -876,7 +1014,10 @@ public class CoreWorkload extends Workload {
         p.getProperty(SCAN_PROPORTION_PROPERTY, SCAN_PROPORTION_PROPERTY_DEFAULT));
     final double readmodifywriteproportion = Double.parseDouble(p.getProperty(
         READMODIFYWRITE_PROPORTION_PROPERTY, READMODIFYWRITE_PROPORTION_PROPERTY_DEFAULT));
-
+    final double batchputproportion = Double.parseDouble(p.getProperty(
+        BATCH_PUT_PROPORTION_PROPERTY, BATCH_PUT_PROPORTION_PROPERTY_DEFAULT));
+    final double batchreadproportion = Double.parseDouble(p.getProperty(
+        BATCH_READ_PROPORTION_PROPERTY, BATCH_READ_PROPORTION_PROPERTY_DEFAULT));
     final DiscreteGenerator operationchooser = new DiscreteGenerator();
     if (readproportion > 0) {
       operationchooser.addValue(readproportion, "READ");
@@ -896,6 +1037,14 @@ public class CoreWorkload extends Workload {
 
     if (readmodifywriteproportion > 0) {
       operationchooser.addValue(readmodifywriteproportion, "READMODIFYWRITE");
+    }
+
+    if (batchputproportion > 0) {
+      operationchooser.addValue(batchputproportion, "BATCH_PUT");
+    }
+
+    if (batchreadproportion > 0) {
+      operationchooser.addValue(batchreadproportion, "BATCH_READ");
     }
     return operationchooser;
   }

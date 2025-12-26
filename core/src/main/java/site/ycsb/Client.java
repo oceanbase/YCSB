@@ -23,6 +23,8 @@ import site.ycsb.measurements.exporter.TextMeasurementsExporter;
 import org.apache.htrace.core.HTraceConfiguration;
 import org.apache.htrace.core.TraceScope;
 import org.apache.htrace.core.Tracer;
+import static site.ycsb.workloads.CoreWorkload.BATCH_PUT_SIZE_PER_OP;
+import static site.ycsb.workloads.CoreWorkload.BATCH_PUT_SIZE_PER_OP_DEFAULT;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -408,15 +410,25 @@ public final class Client {
 
     final List<ClientThread> clients = new ArrayList<>(threadcount);
     try (final TraceScope span = tracer.newScope(CLIENT_INIT_SPAN)) {
-      int opcount;
+      final int opcount;
       if (dotransactions) {
         opcount = Integer.parseInt(props.getProperty(OPERATION_COUNT_PROPERTY, "0"));
       } else {
+        // Load mode: opcount is the number of "insert operations" executed by ClientThread.
+        // If CoreWorkload.doInsert inserts a batch of records per call (db.batchPut), we must
+        // divide the record count by batch size (ceil) to keep the total inserted records correct.
+        final int recordOpcount;
         if (props.containsKey(INSERT_COUNT_PROPERTY)) {
-          opcount = Integer.parseInt(props.getProperty(INSERT_COUNT_PROPERTY, "0"));
+          recordOpcount = Integer.parseInt(props.getProperty(INSERT_COUNT_PROPERTY, "0"));
         } else {
-          opcount = Integer.parseInt(props.getProperty(RECORD_COUNT_PROPERTY, DEFAULT_RECORD_COUNT));
+          recordOpcount = Integer.parseInt(props.getProperty(RECORD_COUNT_PROPERTY, DEFAULT_RECORD_COUNT));
         }
+
+        int batchPutSize = Integer.parseInt(props.getProperty(BATCH_PUT_SIZE_PER_OP, BATCH_PUT_SIZE_PER_OP_DEFAULT));
+        if (batchPutSize < 1) {
+          batchPutSize = 1;
+        }
+        opcount = (recordOpcount + batchPutSize - 1) / batchPutSize; // ceil(recordOpcount / batchPutSize)
       }
       if (threadcount > opcount && opcount > 0){
         threadcount = opcount;

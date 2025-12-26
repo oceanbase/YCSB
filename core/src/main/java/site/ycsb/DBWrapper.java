@@ -52,7 +52,8 @@ public class DBWrapper extends DB {
   private final String scopeStringRead;
   private final String scopeStringScan;
   private final String scopeStringUpdate;
-
+  private final String scopeStringBatchPut;
+  private final String scopeStringBatchRead;
   public DBWrapper(final DB db, final Tracer tracer) {
     this.db = db;
     measurements = Measurements.getMeasurements();
@@ -65,6 +66,8 @@ public class DBWrapper extends DB {
     scopeStringRead = simple + "#read";
     scopeStringScan = simple + "#scan";
     scopeStringUpdate = simple + "#update";
+    scopeStringBatchPut = simple + "#batchPut";
+    scopeStringBatchRead = simple + "#batchRead";
   }
 
   /**
@@ -250,4 +253,43 @@ public class DBWrapper extends DB {
       return res;
     }
   }
+
+    /**
+   * batch operation exclude read.
+   *
+   * @param table The name of the table
+   * @param valuesMap a batch operation for multiple rows.
+   * @return The result of the operation.
+   */
+    public Status batchPut(String table, Map<String, Map<String, ByteIterator>> valuesMap) {
+      try (final TraceScope span = tracer.newScope(scopeStringBatchPut)) {
+        long ist = measurements.getIntendedStartTimeNs();
+        long st = System.nanoTime();
+        Status res = db.batchPut(table, valuesMap);
+        long en = System.nanoTime();
+        measure("BATCH_PUT", res, ist, st, en);
+        measurements.reportStatus("BATCH_PUT", res);
+        return res;
+      }
+    }
+  
+    /**
+     * batch read operation.
+     *
+     * @param table The name of the table
+     * @param fields The list of fields to read, or null for all of them
+     * @param valuesMap a batch operation for multiple rows.
+     * @return The result of the operation.
+     */
+    public Status batchRead(String table, Set<String> fields, Map<String, Map<String, ByteIterator>> valuesMap) {
+      try (final TraceScope span = tracer.newScope(scopeStringBatchRead)) {
+        long ist = measurements.getIntendedStartTimeNs();
+        long st = System.nanoTime();
+        Status res = db.batchRead(table, fields, valuesMap);
+        long en = System.nanoTime();
+        measure("BATCH_READ", res, ist, st, en);
+        measurements.reportStatus("BATCH_READ", res);
+        return res;
+      }
+    }
 }
