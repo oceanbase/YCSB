@@ -32,12 +32,19 @@ import static site.ycsb.Status.*;
 import static org.apache.commons.lang.StringUtils.isNotBlank;
 
 public class OBHBaseClient extends DB {
+    public static final String PROP_KEY_PARTITION_START_TS      = "obkv.rangePartitionStartTs";
+    public static final String PROP_KEY_PARTITION_DURATION_MS   = "obkv.rangePartitionDurationMs";
+    public static final String PROP_KEY_PARTITION_COUNT         = "obkv.rangePartitionCount";
+    public static final String PROP_KEY_COUNT                   = "obkv.keyCount";
+    public static final String PROP_IS_MULTI_VERSION_MODE      = "obkv.isMultiVersionMode";
+
     public static final String COLUMN_FAMILY = "hbase.oceanbase.columnFamily";
     public static final String TABLE         = "hbase.oceanbase.table";
     public static final String HBASE_MASTER  = "hbase.master";
     public static final String ZOOKEEPER_QUORUM = "hbase.zookeeper.quorum";
     public static final String ZOOKEEPER_CLIENT_PORT = "hbase.zookeeper.property.clientPort";
     public static final String HBASE_CLIENT_IPC_POOL_SIZE = "hbase.client.ipc.pool.size";
+    private static final String KEY_FORMAT = "user_%012d_%s";
     private String             columnFamily;
     private byte[]             columnFamilyBytes;
     private String             tableName;
@@ -45,6 +52,11 @@ public class OBHBaseClient extends DB {
     private Connection connection = null;
     private int                zeropadding;
     private boolean            isObkv = true;
+    private long partitionStartTs = 0;  // 第一个range分区的起始时间戳（毫秒）
+    private long partitionDurationMs = 0;  // 每个range分区的时间长度（毫秒）
+    private int partitionCount = 0;  // 一级range分区的数量
+    private int keyCount = 1;  // id的总数量
+    private boolean isMultiVersionMode = false;  // 是否使用多版本模式
 
     @Override
     public void cleanup() throws DBException {
@@ -71,39 +83,16 @@ public class OBHBaseClient extends DB {
         System.out.println("table: " + tableName);
         System.out.println("debug: " + debug);
         System.out.println("isObkv: " + isObkv);
+        isMultiVersionMode = Boolean.parseBoolean(getProperties().getProperty(PROP_IS_MULTI_VERSION_MODE, "false"));
+        if (isMultiVersionMode) {
+            initPartitionConfig();
+        }
         Configuration config = HBaseConfiguration.create();
         if (isObkv) {
             config.set(ClusterConnection.HBASE_CLIENT_CONNECTION_IMPL, "com.alipay.oceanbase.hbase.util.OHConnectionImpl");
             initObkvConfig(config);
         } else {
-            // 不设置hbase.master，让HBase通过ZooKeeper自动发现
-            // config.set("hbase.master", getProperties().getProperty("hbase.master", "127.0.0.1:16000"));
-            config.set(ZOOKEEPER_QUORUM, getProperties().getProperty(ZOOKEEPER_QUORUM, "127.0.0.1"));
-            config.set(ZOOKEEPER_CLIENT_PORT, getProperties().getProperty(ZOOKEEPER_CLIENT_PORT, "2181"));
-            config.set(HBASE_CLIENT_IPC_POOL_SIZE, getProperties().getProperty(HBASE_CLIENT_IPC_POOL_SIZE, "256"));
-            
-            // 添加超时配置，防止卡死
-            config.set("hbase.client.operation.timeout", "10000"); // 10秒操作超时
-            config.set("hbase.client.scanner.timeout.period", "10000"); // 10秒扫描超时
-            config.set("hbase.rpc.timeout", "10000"); // 10秒RPC超时
-            config.set("hbase.client.retries.number", "1"); // 重试次数
-            config.set("hbase.client.pause", "100"); // 重试间隔100ms
-            
-            // 添加更多HBase配置
-            config.set("hbase.zookeeper.property.clientPort", getProperties().getProperty(ZOOKEEPER_CLIENT_PORT, "2181"));
-            config.set("hbase.zookeeper.quorum", getProperties().getProperty(ZOOKEEPER_QUORUM, "127.0.0.1"));
-            
-            System.out.println("HBase Configuration:");
-            System.out.println("  ZOOKEEPER_QUORUM: " + config.get(ZOOKEEPER_QUORUM));
-            System.out.println("  ZOOKEEPER_CLIENT_PORT: " + config.get(ZOOKEEPER_CLIENT_PORT));
-            System.out.println("  HBASE_MASTER: (auto-discovered via ZooKeeper)");
-            System.out.println("  HBASE_CLIENT_OPERATION_TIMEOUT: " + config.get("hbase.client.operation.timeout"));
-            System.out.println("  HBASE_RPC_TIMEOUT: " + config.get("hbase.rpc.timeout"));
-            
-            // 测试网络连接
-            System.out.println("Testing network connectivity...");
-            testNetworkConnectivity(getProperties().getProperty(ZOOKEEPER_QUORUM, "127.0.0.1"), 
-                                   Integer.parseInt(getProperties().getProperty(ZOOKEEPER_CLIENT_PORT, "2181")));
+            initHBaseConfigAndTestConnectivity(config);
         }
         try {
             System.out.println("Creating HBase connection...");
@@ -145,6 +134,90 @@ public class OBHBaseClient extends DB {
             }
             e.printStackTrace();
             throw new DBException(e);
+        }
+    }
+
+    private void initHBaseConfigAndTestConnectivity(final Configuration config) {
+        // 不设置hbase.master，让HBase通过ZooKeeper自动发现
+        // config.set("hbase.master", getProperties().getProperty("hbase.master", "127.0.0.1:16000"));
+        config.set(ZOOKEEPER_QUORUM, getProperties().getProperty(ZOOKEEPER_QUORUM, "127.0.0.1"));
+        config.set(ZOOKEEPER_CLIENT_PORT, getProperties().getProperty(ZOOKEEPER_CLIENT_PORT, "2181"));
+        config.set(HBASE_CLIENT_IPC_POOL_SIZE, getProperties().getProperty(HBASE_CLIENT_IPC_POOL_SIZE, "256"));
+
+        // 添加超时配置，防止卡死
+        config.set("hbase.client.operation.timeout", "10000"); // 10秒操作超时
+        config.set("hbase.client.scanner.timeout.period", "10000"); // 10秒扫描超时
+        config.set("hbase.rpc.timeout", "10000"); // 10秒RPC超时
+        config.set("hbase.client.retries.number", "1"); // 重试次数
+        config.set("hbase.client.pause", "100"); // 重试间隔100ms
+
+        // 添加更多HBase配置
+        config.set("hbase.zookeeper.property.clientPort", getProperties().getProperty(ZOOKEEPER_CLIENT_PORT, "2181"));
+        config.set("hbase.zookeeper.quorum", getProperties().getProperty(ZOOKEEPER_QUORUM, "127.0.0.1"));
+
+        System.out.println("HBase Configuration:");
+        System.out.println("  ZOOKEEPER_QUORUM: " + config.get(ZOOKEEPER_QUORUM));
+        System.out.println("  ZOOKEEPER_CLIENT_PORT: " + config.get(ZOOKEEPER_CLIENT_PORT));
+        System.out.println("  HBASE_MASTER: (auto-discovered via ZooKeeper)");
+        System.out.println("  HBASE_CLIENT_OPERATION_TIMEOUT: " + config.get("hbase.client.operation.timeout"));
+        System.out.println("  HBASE_RPC_TIMEOUT: " + config.get("hbase.rpc.timeout"));
+
+        // 测试网络连接
+        System.out.println("Testing network connectivity...");
+        testNetworkConnectivity(
+                getProperties().getProperty(ZOOKEEPER_QUORUM, "127.0.0.1"),
+                Integer.parseInt(getProperties().getProperty(ZOOKEEPER_CLIENT_PORT, "2181")));
+    }
+
+    private void initPartitionConfig() throws DBException {
+        Properties props = getProperties();
+        // partition configuration for uniform distribution - 必须显式指定且值必须大于0
+        if (props.getProperty(PROP_KEY_PARTITION_START_TS) != null) {
+            partitionStartTs = Long.parseLong(props.getProperty(PROP_KEY_PARTITION_START_TS));
+            if (partitionStartTs <= 0) {
+                throw new DBException("Invalid partition configuration: " + PROP_KEY_PARTITION_START_TS + 
+                                    " must be specified and greater than 0 (millisecond timestamp)");
+            }
+        } else {
+            throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_PARTITION_START_TS + 
+                                " (must be greater than 0, millisecond timestamp)");
+        }
+        if (props.getProperty(PROP_KEY_PARTITION_DURATION_MS) != null) {
+            partitionDurationMs = Long.parseLong(props.getProperty(PROP_KEY_PARTITION_DURATION_MS));
+            if (partitionDurationMs <= 0) {
+                throw new DBException("Invalid partition configuration: " + PROP_KEY_PARTITION_DURATION_MS + 
+                                    " must be specified and greater than 0 (milliseconds)");
+            }
+        } else {
+            throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_PARTITION_DURATION_MS + 
+                                " (must be greater than 0, milliseconds)");
+        }
+        if (props.getProperty(PROP_KEY_PARTITION_COUNT) != null) {
+            partitionCount = Integer.parseInt(props.getProperty(PROP_KEY_PARTITION_COUNT));
+            if (partitionCount <= 0) {
+                throw new DBException("Invalid partition configuration: " + PROP_KEY_PARTITION_COUNT + 
+                                    " must be specified and greater than 0 (integer)");
+            }
+        } else {
+            throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_PARTITION_COUNT + 
+                                " (must be greater than 0, integer)");
+        }
+        if (props.getProperty(PROP_KEY_COUNT) != null) {
+            keyCount = Integer.parseInt(props.getProperty(PROP_KEY_COUNT));
+            if (keyCount <= 0) {
+                throw new DBException("Invalid partition configuration: " + PROP_KEY_COUNT + 
+                                    " must be specified and greater than 0 (integer)");
+            }
+        } else {
+            throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_COUNT + 
+                                " (must be greater than 0, integer)");
+        }
+        
+        if (debug) {
+            System.out.println("Partition config: startTs=" + partitionStartTs + 
+                             ", durationMs=" + partitionDurationMs + 
+                             ", count=" + partitionCount +
+                             ", keyCount=" + keyCount);
         }
     }
 
@@ -222,44 +295,6 @@ public class OBHBaseClient extends DB {
     }
 
     /**
-     * 测试ZooKeeper连接
-     */
-    private void testZooKeeperConnection(String quorum, String port) {
-        try {
-            System.out.println("Testing ZooKeeper connection to " + quorum + ":" + port);
-            org.apache.zookeeper.ZooKeeper zk = new org.apache.zookeeper.ZooKeeper(
-                quorum + ":" + port, 5000, new org.apache.zookeeper.Watcher() {
-                    @Override
-                    public void process(org.apache.zookeeper.WatchedEvent event) {
-                        System.out.println("ZooKeeper event: " + event.getType());
-                    }
-                });
-            
-            // 等待连接建立
-            int retries = 0;
-            while (zk.getState() != org.apache.zookeeper.ZooKeeper.States.CONNECTED && retries < 10) {
-                Thread.sleep(1000);
-                retries++;
-                System.out.println("ZooKeeper connection attempt " + retries + ", state: " + zk.getState());
-            }
-            
-            if (zk.getState() == org.apache.zookeeper.ZooKeeper.States.CONNECTED) {
-                System.out.println("ZooKeeper connection successful");
-                // 测试基本操作
-                zk.exists("/", false);
-                System.out.println("ZooKeeper root path accessible");
-            } else {
-                System.err.println("ZooKeeper connection failed, state: " + zk.getState());
-            }
-            
-            zk.close();
-        } catch (Exception e) {
-            System.err.println("ZooKeeper connection test failed: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    /**
      * 将零填充的字符串转换为long，加上指定值，再转换回零填充字符串
      * @param paddedKey 零填充的字符串，如"00000028500000"
      * @param increment 要加上的值
@@ -282,6 +317,152 @@ public class OBHBaseClient extends DB {
         return incrementPaddedKey(paddedKey, increment, zeropadding);
     }
 
+
+     /**
+     * 基于ycsb_key生成唯一Key，确保Key数量为KeyCount，循环使用
+     * @param key YCSB 生成ycsb_key，是一个整型字符串（递增id）
+     * @return K 字符串，长度为 36
+     */
+     private String generateK(String key) {
+        if (!isMultiVersionMode) {
+            return key;
+        }
+
+        long keyValue;
+        try {
+            keyValue = Long.parseLong(key.trim());
+        } catch (NumberFormatException e) {
+            // 如果不是数字，使用hashCode
+            keyValue = Math.abs((long)key.hashCode());
+        }
+        
+        // id = key % keyCount，确保key循环使用
+        long KeyValue = keyValue % keyCount;
+        
+        return generateKeyPrefix(key) + generateTs(key);
+    }
+
+    private String generateKeyPrefix(String key) {
+        long keyValue;
+        try {
+            keyValue = Long.parseLong(key.trim());
+        } catch (NumberFormatException e) {
+            // 如果不是数字，使用hashCode
+            keyValue = Math.abs((long)key.hashCode());
+        }
+        
+        // id = key % keyCount，确保key循环使用
+        long KeyValue = keyValue % keyCount;
+        return String.format(KEY_FORMAT, KeyValue, "");
+    }
+
+    /**
+     * 基于key生成ts (timestamp)，确保均匀分布在所有range分区上
+     * @param key YCSB 生成的 key，是一个整型字符串（递增id）
+     * @return Timestamp 对象
+     */
+    private Long generateTs(String key) {
+        // 如果未配置分区参数，使用当前系统时间
+        if (!isMultiVersionMode || partitionCount <= 0 || partitionDurationMs <= 0) {
+            return System.currentTimeMillis();
+        }
+        
+        // 将key转换为数值
+        long keyValue;
+        try {
+            keyValue = Long.parseLong(key.trim());
+        } catch (NumberFormatException e) {
+            // 如果不是数字，使用hashCode
+            keyValue = Math.abs((long)key.hashCode());
+        }
+        
+        // 使用key本身作为hash值，确保不同key均匀分布
+        // 为了更好的分布，可以使用一个简单的hash函数
+        long hash = keyValue;
+        
+        // 计算分区索引：hash % partitionCount
+        int partitionIndex = (int) (hash % partitionCount);
+        
+        // 计算在该分区内的偏移：hash % partitionDurationMs
+        long offsetInPartition = hash % partitionDurationMs;
+        
+        // 计算最终的ts = 起始时间 + 分区索引 * 分区长度 + 分区内偏移
+        long finalTs = partitionStartTs + partitionIndex * partitionDurationMs + offsetInPartition;
+        
+        if (debug) {
+            System.out.println("generateTs: key=" + key + 
+                             ", hash=" + hash + 
+                             ", partitionIndex=" + partitionIndex + 
+                             ", offsetInPartition=" + offsetInPartition + 
+                             ", finalTs=" + finalTs);
+        }
+        
+        return finalTs;
+    }
+
+    private long genRangePartStartTs(String key) {
+        // 将key转换为数值
+        long keyValue;
+        try {
+            keyValue = Long.parseLong(key.trim());
+        } catch (NumberFormatException e) {
+            // 如果不是数字，使用hashCode
+            keyValue = Math.abs((long)key.hashCode());
+        }
+        
+        // 使用key本身作为hash值，确保不同key均匀分布
+        // 为了更好的分布，可以使用一个简单的hash函数
+        long hash = keyValue;
+        
+        // 计算分区索引：hash % partitionCount
+        int partitionIndex = (int) (hash % partitionCount);
+        
+        // 计算在该分区内的偏移：hash % partitionDurationMs
+        long offsetInPartition = hash % partitionDurationMs;
+        
+        // 计算最终的ts = 起始时间 + 分区索引 * 分区长度
+        long finalTs = partitionStartTs + partitionIndex * partitionDurationMs;
+        
+        if (debug) {
+            System.out.println("generateTs: key=" + key + 
+                             ", hash=" + hash + 
+                             ", partitionIndex=" + partitionIndex + 
+                             ", finalTs=" + finalTs);
+        }
+        return finalTs;
+    }
+    private long genRangePartEndTs(String key) {
+        // 将key转换为数值
+        long keyValue;
+        try {
+            keyValue = Long.parseLong(key.trim());
+        } catch (NumberFormatException e) {
+            // 如果不是数字，使用hashCode
+            keyValue = Math.abs((long)key.hashCode());
+        }
+        
+        // 使用key本身作为hash值，确保不同key均匀分布
+        // 为了更好的分布，可以使用一个简单的hash函数
+        long hash = keyValue;
+        
+        // 计算分区索引：hash % partitionCount
+        int partitionIndex = (int) (hash % partitionCount);
+        
+        // 计算在该分区内的偏移：hash % partitionDurationMs
+        long offsetInPartition = hash % partitionDurationMs;
+        
+        // 计算最终的ts = 起始时间 + 分区索引 * 分区长度 + 分区内偏移
+        long finalTs = partitionStartTs + (partitionIndex + 1)* partitionDurationMs - 1;
+        
+        if (debug) {
+            System.out.println("generateTs: key=" + key + 
+                             ", hash=" + hash + 
+                             ", partitionIndex=" + partitionIndex + 
+                             ", finalTs=" + finalTs);
+        }
+        return finalTs;
+    }
+
     /**
      * 读取数据测试，目前无法测试批量读取
      * @param table table
@@ -299,7 +480,10 @@ public class OBHBaseClient extends DB {
                 System.out.println("Doing read from HBase columnfamily " + columnFamily);
                 System.out.println("Doing read for key: " + key);
             }
-            Get g = new Get(Bytes.toBytes(key));
+            Get g = new Get(Bytes.toBytes(generateK(key)));
+            if (isMultiVersionMode) {
+                g.setTimeRange(genRangePartStartTs(key), genRangePartEndTs(key));
+            }
             if (fields == null) {
                 g.addFamily(columnFamilyBytes);
             } else {
@@ -337,27 +521,32 @@ public class OBHBaseClient extends DB {
     @Override
     public Status scan(String table, String startkey, int recordcount, Set<String> fields,
                        Vector<HashMap<String, ByteIterator>> result) {
-
-        Scan scan = new Scan(Bytes.toBytes(startkey));
-        scan.setCaching(recordcount);
-        scan.setMaxVersions(1);
-        // 计算结束key并设置scan范围
-        String endKeyStr = incrementPaddedKey(startkey, recordcount);
-        scan.setStopRow(Bytes.toBytes(endKeyStr));
-       
-        if (fields == null) {
-            scan.addFamily(columnFamilyBytes);
-        } else {
-            for (String field : fields) {
-                scan.addColumn(columnFamilyBytes, Bytes.toBytes(field));
-            }
-        }
-
         ResultScanner scanner = null;
         try {
+            Scan scan = new Scan();
+            scan.setCaching(recordcount);
+            if (isMultiVersionMode) {
+                scan.setStartRow(Bytes.toBytes(generateKeyPrefix(startkey) + "0"));
+                scan.setStopRow(Bytes.toBytes(generateKeyPrefix(startkey) + "9"));
+                scan.setTimeRange(genRangePartStartTs(startkey), genRangePartEndTs(startkey));
+                scan.setLimit(recordcount);
+            } else {
+                scan.setMaxVersions(1);
+                scan.setStartRow(Bytes.toBytes(generateK(startkey)));
+                scan.setStopRow(Bytes.toBytes(incrementPaddedKey(generateK(startkey), recordcount)));
+            }
+        
+            if (fields == null) {
+                scan.addFamily(columnFamilyBytes);
+            } else {
+                for (String field : fields) {
+                    scan.addColumn(columnFamilyBytes, Bytes.toBytes(field));
+                }
+            }
+
+
             scanner = connection.getTable(TableName.valueOf(tableName)).getScanner(scan);
             int numResults = 0;
-
             for (Result rr = scanner.next(); rr != null; rr = scanner.next()) {
                 // get row key
                 String key = Bytes.toString(rr.getRow());
@@ -411,13 +600,17 @@ public class OBHBaseClient extends DB {
         if (debug) {
             System.out.println("Setting up put for key: " + key);// NOPMD
         }
-        Put p = new Put(Bytes.toBytes(key));
+        Put p = new Put(Bytes.toBytes(generateK(key)));
         for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
             if (debug) {
                 System.out.println("Adding field/value " + entry.getKey() + "/" + entry.getValue()// NOPMD
                                    + " to put request");// NOPMD
             }
-            p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), entry.getValue().toArray());
+            if (isMultiVersionMode) {
+                p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), generateTs(key), entry.getValue().toArray());
+            } else {
+                p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), entry.getValue().toArray());
+            }
         }
         try {
             connection.getTable(TableName.valueOf(tableName)).put(p);
@@ -466,8 +659,14 @@ public class OBHBaseClient extends DB {
     public Status batchPut(String table, Map<String, Map<String, ByteIterator>> valuesMap) {
         List<Put> putList = new ArrayList<>();
         valuesMap.forEach((key, values) -> {
-            Put put = new Put(key.getBytes());
-            values.forEach((k, v) -> put.addColumn(columnFamilyBytes, k.getBytes(), v.toArray()));
+            Put put = new Put(generateK(key).getBytes());
+            values.forEach((k, v) -> {
+                if (isMultiVersionMode) {
+                    put.addColumn(columnFamilyBytes, k.getBytes(), generateTs(key), v.toArray());
+                } else {
+                    put.addColumn(columnFamilyBytes, k.getBytes(), v.toArray());
+                }
+            });
             putList.add(put);
         });
         try {
@@ -485,7 +684,7 @@ public class OBHBaseClient extends DB {
     public Status batchRead(String table, Set<String> fields, Map<String, Map<String, ByteIterator>> valuesMap) {
         List<Get> getList = new ArrayList<>();
         valuesMap.keySet().forEach(key -> {
-            Get get = new Get(key.getBytes());
+            Get get = new Get(generateK(key).getBytes());
             if (fields == null) {
                 get.addFamily(columnFamilyBytes);
             } else {

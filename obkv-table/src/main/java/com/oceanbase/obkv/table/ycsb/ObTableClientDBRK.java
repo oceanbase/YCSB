@@ -264,13 +264,7 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
         // id = key % idCount，确保id循环使用
         long idValue = keyValue % idCount;
         
-        // 格式化为字符串，确保长度为36（CHAR(36)）
-        String idStr = String.valueOf(idValue);
-        if (idStr.length() > 36) {
-            // 如果超过36，截断
-            return idStr.substring(0, 36);
-        }
-        return idStr;
+        return String.valueOf(idValue);;
     }
 
     /**
