@@ -18,20 +18,20 @@ LICENSE file.
 
 
 # YCSB for OBKV
-This YCSB distribution includes two OBKV model bindings:
+本 YCSB 发行版包含两个 OBKV 模型绑定：
 
-## OBKV-HBase Binding
+## OBKV-HBase 绑定
 
-The **obkv-hbase** binding is designed for testing OceanBase HBase-compatible mode performance.
+**obkv-hbase** 绑定用于测试 OceanBase HBase 兼容模式的性能。
 
-**Features:**
-- Support for both ODP mode and direct connection mode
-- Range partitioning with key subpartitions
-- Multi-version mode support
-- Batch operations (batchPut, batchRead)
-- Automatic table creation script
+**功能特性：**
+- 支持 ODP 模式和直连模式
+- Range 分区配合 Key 子分区
+- 多版本模式支持
+- 批量操作（batchPut、batchRead）
+- 自动建表脚本
 
-**Quick Start:**
+**快速开始：**
 ```sh
 cd obkv-hbase
 ./build.sh
@@ -40,18 +40,18 @@ cd obkv-hbase
 ./run_fast_test.sh read
 ```
 
-For detailed documentation, see [obkv-hbase/README.md](obkv-hbase/README.md).
+详细文档请参考 [obkv-hbase/README.md](obkv-hbase/README.md)。
 
-## OBKV-Table Binding
+## OBKV-Table 绑定
 
-The **obkv-table** binding is designed for testing OceanBase Table model performance.
+**obkv-table** 绑定用于测试 OceanBase Table 模型的性能。
 
-**Features:**
-- Support for range partitioning and range+key partitioning
-- Flexible table creation with configurable partition strategies
-- Support for various workload types
+**功能特性：**
+- 支持 Range 分区和 Range+Key 分区
+- 灵活的表创建配置，支持多种分区策略
+- 支持多种工作负载类型
 
-**Quick Start:**
+**快速开始：**
 ```sh
 cd obkv-table
 ./build.sh
@@ -60,5 +60,5 @@ cd obkv-table
 ./run_fast_test.sh read
 ```
 
-For detailed documentation, see [obkv-table/README.md](obkv-table/README.md).
+详细文档请参考 [obkv-table/README.md](obkv-table/README.md)。
 
