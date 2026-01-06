@@ -74,15 +74,12 @@ public class OBHBaseClient extends DB {
      * @throws DBException exception
      */
     public void init() throws DBException {
-        debug = Boolean.parseBoolean(getProperties().getProperty("debug"));
-        isObkv = Boolean.parseBoolean(getProperties().getProperty("isObkv"));
+        debug = Boolean.parseBoolean(getProperties().getProperty("obkv.debug", "false"));
+        isObkv = Boolean.parseBoolean(getProperties().getProperty("isObkv", "true"));
         columnFamily = getProperties().getProperty(COLUMN_FAMILY);
         tableName = getProperties().getProperty(TABLE);
         columnFamilyBytes = Bytes.toBytes(columnFamily);
-        System.out.println("columnFamily: " + columnFamily);
-        System.out.println("table: " + tableName);
-        System.out.println("debug: " + debug);
-        System.out.println("isObkv: " + isObkv);
+        System.out.println("columnFamily: " + columnFamily + ", table: " + tableName + ", debug: " + debug + ", isObkv: " + isObkv);
         isMultiVersionMode = Boolean.parseBoolean(getProperties().getProperty(PROP_IS_MULTI_VERSION_MODE, "false"));
         if (isMultiVersionMode) {
             initPartitionConfig();
@@ -95,9 +92,7 @@ public class OBHBaseClient extends DB {
             initHBaseConfigAndTestConnectivity(config);
         }
         try {
-            System.out.println("Creating HBase connection...");
             connection = ConnectionFactory.createConnection(config);
-            System.out.println("Connection created successfully");
             
             if (!isObkv) {
                 final TableName tName = TableName.valueOf(tableName);
@@ -481,9 +476,9 @@ public class OBHBaseClient extends DB {
                 System.out.println("Doing read for key: " + key);
             }
             Get g = new Get(Bytes.toBytes(generateK(key)));
-            if (isMultiVersionMode) {
-                g.setTimeRange(genRangePartStartTs(key), genRangePartEndTs(key));
-            }
+            // if (isMultiVersionMode) {
+            //     g.setTimeRange(genRangePartStartTs(key), genRangePartEndTs(key));
+            // }
             if (fields == null) {
                 g.addFamily(columnFamilyBytes);
             } else {
@@ -621,6 +616,7 @@ public class OBHBaseClient extends DB {
             if (debug) {
                 System.err.println("Error doing put: " + e);// NOPMD
             }
+            e.printStackTrace();
             return SERVICE_UNAVAILABLE;
         } catch (ConcurrentModificationException e) {
             //do nothing for now...hope this is rare

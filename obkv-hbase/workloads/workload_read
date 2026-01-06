@@ -22,20 +22,23 @@
 #   Default data size: 1 KB records (10 fields, 100 bytes each, plus key)
 #   Request distribution: zipfian
 
-workload=com.yahoo.ycsb.workloads.CoreWorkload
+workload=site.ycsb.workloads.CoreWorkload
 
 # ATTENTION !!! 
 # for batchput, if you want to insert record without duplication, 
 # the recordcount mut be larger than or eqaul to batchput.size.per.op * operationcount
 # otherwise, it may generate duplicate records and put operation will overwrite them
-recordcount=
-operationcount=
+recordcount=100
+operationcount=100
+
+fieldcount=10
+fieldlength=100
 
 insertproportion=0
-readproportion=1
+readproportion=0
 updateproportion=0
 readmodifywriteproportion=0
-scanproportion=0
+scanproportion=1
 # for batch operation
 batchputproportion=0
 batchput.size.per.op=10
@@ -51,24 +54,35 @@ threadcount=10
 obkv.isOdpMode=false
 
 ##### ODP模式必填 #####
-obkv.odpAddr=
-obkv.odpPort=
+hbase.oceanbase.odpAddr=
+hbase.oceanbase.odpPort=
 
 ##### 直连模式必填 #####
-obkv.configUrl=
-obkv.sysUserName=
-obkv.sysPassword=
+hbase.oceanbase.paramURL=
+hbase.oceanbase.sysUserName=
+hbase.oceanbase.sysPassword=
 ##### 账户密码 #####
-obkv.fullUserName=
-obkv.password=
-obkv.database=test
+hbase.oceanbase.fullUserName=
+hbase.oceanbase.password=
+hbase.oceanbase.databasee=test
+
+# ========== 表名 ==========
+hbase.oceanbase.table=ycsb_test
+hbase.oceanbase.columnFamily=cf
 
 # ========== 分区配置（二级分区表必填） ==========
-obkv.rangePartitionStartTs=
-obkv.rangePartitionDurationMs=
-obkv.rangePartitionCount=
+obkv.rangePartitionStartTs=1767703570000
+obkv.rangePartitionDurationMs=2592000000
+obkv.rangePartitionCount=1
 # ========== 多版本配置 (obkv.isMultiVersionMode=true 时必填) ==========
-obkv.isMultiVersionMode=false
-obkv.keyCount=
+obkv.isMultiVersionMode=true
+obkv.keyCount=10000
+
+# ========== 其他配置 ==========
+#### 连接数配置 ####
+server.connection.pool.size=20
+#### 查询超时参数 ####
+rpc.operation.timeout=10000
+rpc.execute.timeout=15000
 
 obkv.debug=false

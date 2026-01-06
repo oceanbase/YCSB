@@ -165,7 +165,7 @@ case "$OPERATION" in
             echo "=========================================="
             echo "执行数据加载..."
             echo "=========================================="
-            java -jar "$JAR_FILE" -db "$DB_CLASS" -P "$WORKLOAD_FILE" -load
+            java -jar "$JAR_FILE" -P "$WORKLOAD_FILE" -load
         fi
         ;;
     "batch_put")

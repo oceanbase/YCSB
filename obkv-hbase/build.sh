@@ -134,7 +134,7 @@ if [ -f "$JAR_PATH" ]; then
     mkdir -p "$OUTPUT_DIR"
     
     # 复制jar包到输出目录
-    OUTPUT_JAR="$OUTPUT_DIR/obkv-hbase-1.0-SNAPSHOT-jar-with-dependencies.jar"
+    OUTPUT_JAR="$OUTPUT_DIR/obkv-hbase-0.18.0-SNAPSHOT-jar-with-dependencies.jar"
     
     # 如果目标文件已存在，先重命名为.old后缀
     if [ -f "$OUTPUT_JAR" ]; then
