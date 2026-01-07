@@ -70,7 +70,15 @@ fi
 
 # 获取项目根目录
 PROJECT_ROOT=$(pwd)
+ROOT_DIR=".."
 CORE_DIR="../core"
+
+# 检查根目录是否存在pom.xml
+if [ ! -f "$ROOT_DIR/pom.xml" ]; then
+    echo "错误：找不到根目录的pom.xml文件：$ROOT_DIR/pom.xml"
+    echo "请确保在正确的项目结构下运行此脚本"
+    exit 1
+fi
 
 # 检查core模块是否存在
 if [ ! -d "$CORE_DIR" ]; then
@@ -79,11 +87,25 @@ if [ ! -d "$CORE_DIR" ]; then
     exit 1
 fi
 
+# 先安装父POM（root pom.xml）
+echo "=========================================="
+echo "安装父POM..."
+echo "=========================================="
+cd "$ROOT_DIR"
+ROOT_ABS_PATH=$(pwd)  # 保存根目录的绝对路径
+echo "在根目录安装父POM..."
+mvn install -N -DskipTests -Dcheckstyle.skip=true -Dmaven.test.skip=true
+if [ $? -ne 0 ]; then
+    echo "错误：父POM安装失败"
+    exit 1
+fi
+echo "父POM安装成功！"
+
 # 构建core模块
 echo "=========================================="
 echo "开始构建core模块..."
 echo "=========================================="
-cd "$CORE_DIR"
+cd "$ROOT_ABS_PATH/core"  # 在根目录下，core是子目录
 
 # 检查core模块的pom.xml
 if [ ! -f "pom.xml" ]; then

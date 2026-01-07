@@ -264,7 +264,7 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
         // id = key % idCount，确保id循环使用
         long idValue = keyValue % idCount;
         
-        return String.valueOf(idValue);;
+        return String.valueOf(idValue);
     }
 
     /**
