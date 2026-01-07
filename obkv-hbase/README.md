@@ -30,74 +30,90 @@ obkv-hbase/
 
 ### 功能概述
 
-`create_table.sh` 用于生成 HBase 风格的 `ycsb_test$cf` 表建表 SQL，支持：
-- Range 分区（基于 G 列，G = ABS(T)）
-- Key 子分区（基于 K_PREFIX 列，K_PREFIX = substring(K, 1, 18)）
-- 动态分区策略（自动创建和过期分区）
+`create_table.sh` 用于生成 HBase 和时序模型的建表 SQL，支持：
+- **模型类型**：HBase 模型和时序模型
+- **分区类型**：
+  - 一级 range 分区（first_part）：基于 K 列进行分区
+  - 二级 range-key 分区（sec_part）：基于 G 列（ABS(T)）进行 range 分区，基于 K_PREFIX 列进行 key 子分区
+- **默认行为**：默认使用 hbase 模式和 first_part 分区类型
 
 ### 使用方法
 
 ```bash
-./create_table.sh <range_partition_count> <key_subpartition_count> [start_timestamp] [partition_duration_ms] [output_file]
+./create_table.sh [OPTIONS]
+```
+
+使用 `--help` 或 `-h` 查看完整帮助信息：
+
+```bash
+./create_table.sh --help
 ```
 
 ### 参数说明
 
+#### 通用参数
+
 | 参数 | 类型 | 必填 | 说明 | 默认值 |
 |------|------|------|------|--------|
-| `range_partition_count` | 整数 | 是 | Range 分区数量 | - |
-| `key_subpartition_count` | 整数 | 是 | 每个 Range 分区的 Key 子分区数量 | - |
-| `start_timestamp` | 时间戳/日期 | 否 | 起始时间戳（毫秒）或日期字符串（YYYY-MM-DD HH:MM:SS） | 当前时间 |
-| `partition_duration_ms` | 整数 | 否 | 每个 Range 分区的时间跨度（毫秒） | 2592000000（1个月） |
-| `output_file` | 文件路径 | 否 | 输出 SQL 文件路径 | 自动生成文件名 |
+| `--mode` | 字符串 | 否 | 模型类型：'hbase' 或 'timeseries' | hbase |
+| `--type` | 字符串 | 否 | 分区类型：'first_part' 或 'sec_part' | first_part |
+| `--table_name` | 字符串 | 否 | 表名 | hbase=ycsb_test, timeseries=ycsb_test |
+| `--family` | 字符串 | 否 | 列族名 | hbase=cf, timeseries=ts_cf |
+| `--output_file` | 文件路径 | 否 | 输出 SQL 文件路径 | 自动生成文件名 |
+| `--help` / `-h` | - | - | 显示帮助信息 | - |
+
+#### 一级分区参数（--type first_part）
+
+| 参数 | 类型 | 必填 | 说明 | 默认值 |
+|------|------|------|------|--------|
+| `--max_key` | 整数 | 是 | 最大 key 值 | - |
+| `--partition_count` | 整数 | 是 | 分区数量 | - |
+| `--key_length` | 整数 | 是 | Key 格式化长度（左补零） | - |
+
+#### 二级分区参数（--type sec_part）
+
+| 参数 | 类型 | 必填 | 说明 | 默认值 |
+|------|------|------|------|--------|
+| `--key_subpartition_count` | 整数 | 是 | Key 子分区数量 | - |
+| `--start_timestamp` | 时间戳/日期 | 否 | 起始时间戳（毫秒）或日期字符串（YYYY-MM-DD HH:MM:SS） | 当前时间 |
+| `--partition_duration_ms` | 整数 | 否 | 分区时间跨度（毫秒） | 86400000（1天） |
 
 ### 使用示例
 
+#### 一级分区示例
+
 ```bash
-# 使用默认值（当前时间，1个月跨度）
-./create_table.sh 1 40
+# HBase 一级分区（使用默认值）
+./create_table.sh --max_key 1000 --partition_count 4 --key_length 12
 
-# 指定起始时间戳
-./create_table.sh 1 40 1704067200000
+# HBase 一级分区（显式指定）
+./create_table.sh --mode hbase --type first_part --max_key 1000 --partition_count 4 --key_length 12
 
-# 指定起始时间和分区跨度
-./create_table.sh 1 40 1704067200000 2592000000
+# 时序模型一级分区
+./create_table.sh --mode timeseries --type first_part --max_key 1000 --partition_count 4 --key_length 12
 
-# 使用日期字符串并指定输出文件
-./create_table.sh 1 40 '2024-01-01 00:00:00' 2592000000 my_table.sql
+# 自定义表名和列族
+./create_table.sh --max_key 500 --partition_count 3 --key_length 10 --table_name mytable --family mycf
 ```
 
-### 生成的表结构
+#### 二级分区示例
 
-生成的 SQL 会创建以下表结构：
+```bash
+# HBase 二级分区（使用默认时间戳）
+./create_table.sh --mode hbase --type sec_part --key_subpartition_count 40 --partition_duration_ms 2592000000
 
-- **表名**: `ycsb_test$cf`
-- **表组**: `ycsb_test`
-- **列定义**:
-  - `K`: varbinary(1024) - Row Key
-  - `Q`: varbinary(256) - Column Qualifier
-  - `T`: bigint(20) - Timestamp
-  - `V`: varbinary(10240) - Value
-  - `G`: bigint(20) GENERATED ALWAYS AS (ABS(T)) - 用于 Range 分区
-  - `K_PREFIX`: varbinary(1024) GENERATED ALWAYS AS (substring(K, 1, 18)) - 用于 Key 子分区
-- **主键**: (K, Q, T)
-- **分区策略**: 
-  - Range 分区基于 G 列
-  - Key 子分区基于 K_PREFIX 列
-  - 动态分区策略：每月自动创建和过期
+# HBase 二级分区（指定时间戳）
+./create_table.sh --mode hbase --type sec_part --key_subpartition_count 40 --start_timestamp 1704067200000 --partition_duration_ms 2592000000
 
-### 分区边界说明
+# HBase 二级分区（使用日期字符串）
+./create_table.sh --mode hbase --type sec_part --key_subpartition_count 40 --start_timestamp '2024-01-01 00:00:00' --partition_duration_ms 2592000000
 
-- 第一个分区边界 = 起始时间 + 1 * 分区跨度
-- 第二个分区边界 = 起始时间 + 2 * 分区跨度
-- 以此类推...
-- 最后一个分区使用 MAXVALUE
+# 时序模型二级分区
+./create_table.sh --mode timeseries --type sec_part --key_subpartition_count 40 --start_timestamp 1704067200000 --partition_duration_ms 2592000000
 
-### 输出说明
-
-脚本默认同时输出到：
-1. **标准输出 (stdout)**: 可以直接查看或通过管道处理
-2. **SQL 文件**: 自动生成文件名格式为 `ycsb_test_cf_r<range>_k<key>_d<duration>.sql`
+# 指定输出文件
+./create_table.sh --max_key 1000 --partition_count 4 --key_length 12 --output_file my_table.sql
+```
 
 ---
 
@@ -146,101 +162,90 @@ Workload 配置文件位于 `workloads/` 目录下，包括：
 
 #### 1. 基础配置
 
-```properties
-# 记录数量（数据加载阶段）
-recordcount=100000
-
-# 操作数量（运行阶段）
-operationcount=10000
-
-# 字段数量和长度
-fieldcount=10
-fieldlength=100
-
-# 线程数
-threadcount=10
-```
+| 参数 | 类型 | 必填 | 说明 | 默认值 |
+|------|------|------|------|--------|
+| `recordcount` | int | 是 | 数据加载阶段的记录数量 | - |
+| `operationcount` | int | 是 | 运行阶段的操作数量 | - |
+| `fieldcount` | int | 否 | 每条记录的字段数量 | 10 |
+| `fieldlength` | int | 否 | 每个字段的长度（字节） | 100 |
+| `threadcount` | int | 否 | 并发线程数 | 1 |
 
 #### 2. 操作比例配置
 
-```properties
-# 操作比例（总和应为 1.0）
-readproportion=0.5          # 读取比例
-insertproportion=0.1        # 插入比例
-scanproportion=0.05         # 扫描比例
-batchputproportion=0        # 批量写入比例
-batchreadproportion=0       # 批量读取比例
-```
+| 参数 | 类型 | 必填 | 说明 | 默认值 |
+|------|------|------|------|--------|
+| `readproportion` | double | 否 | 读取操作比例 | 0.95 |
+| `insertproportion` | double | 否 | 插入操作比例 | 0.05 |
+| `scanproportion` | double | 否 | 扫描操作比例 | 0 |
+| `batchputproportion` | double | 否 | 批量写入操作比例 | 0 |
+| `batchreadproportion` | double | 否 | 批量读取操作比例 | 0 |
+
+**注意**: 所有操作比例的总和应为 1.0
 
 #### 3. 批量操作配置
 
-```properties
-# 批量操作大小
-batchput.size.per.op=10     # 每次批量写入的记录数
-batchread.size.per.op=10    # 每次批量读取的记录数
-```
+| 参数 | 类型 | 必填 | 说明 | 默认值 |
+|------|------|------|------|--------|
+| `batchput.size.per.op` | int | 否 | 每次批量写入的记录数 | 1 |
+| `batchread.size.per.op` | int | 否 | 每次批量读取的记录数 | 1 |
 
 **注意**: 对于 batchput，如果要避免重复记录，需要确保 `recordcount >= batchput.size.per.op * operationcount`
 
 #### 4. 连接配置（OBKV 模式）
 
-```properties
-# 连接模式（true=ODP模式, false=直连模式）
-obkv.isOdpMode=true
-
-##### ODP 模式必填 #####
-hbase.oceanbase.odpAddr=your_odp_address
-hbase.oceanbase.odpPort=your_odp_port
-
-##### 直连模式必填 #####
-hbase.oceanbase.paramURL=your_param_url
-hbase.oceanbase.sysUserName=your_sys_user
-hbase.oceanbase.sysPassword=your_sys_password
-
-##### 账户密码（两种模式都需要）#####
-hbase.oceanbase.fullUserName=your_full_user_name
-hbase.oceanbase.password=your_password
-hbase.oceanbase.database=your_database_name
-```
+| 参数 | 类型 | 必填 | 说明 | 默认值 |
+|------|------|------|------|--------|
+| `obkv.isOdpMode` | boolean | 是 | 连接模式，true=ODP模式，false=直连模式 | - |
+| `hbase.oceanbase.odpAddr` | string | 是（ODP模式） | ODP 服务器地址 | - |
+| `hbase.oceanbase.odpPort` | int | 是（ODP模式） | ODP 服务器端口 | - |
+| `hbase.oceanbase.paramURL` | string | 是（直连模式） | 直连模式的参数 URL | - |
+| `hbase.oceanbase.sysUserName` | string | 是（直连模式） | 系统用户名 | - |
+| `hbase.oceanbase.sysPassword` | string | 是（直连模式） | 系统用户密码 | - |
+| `hbase.oceanbase.fullUserName` | string | 是 | 完整用户名（格式：用户名@租户名#集群名） | - |
+| `hbase.oceanbase.password` | string | 是 | 用户密码 | - |
+| `hbase.oceanbase.database` | string | 是 | 数据库名 | - |
 
 #### 5. 表配置
 
-```properties
-# 表名和列族
-hbase.oceanbase.table=ycsb_test
-hbase.oceanbase.columnFamily=cf
-```
+| 参数 | 类型 | 必填 | 说明 | 默认值 |
+|------|------|------|------|--------|
+| `hbase.oceanbase.table` | string | 是 | 表名（不含列族） | - |
+| `hbase.oceanbase.columnFamily` | string | 是 | 列族名 | - |
 
 #### 6. 分区配置
 
-```properties
+测试负载根据 `obkv.isMultiVersionMode` 参数分为两种模式，分别适用于不同的表类型：
 
-# Range 分区配置
-obkv.rangePartitionStartTs=1767703570000        # 起始时间戳（毫秒）
-obkv.rangePartitionDurationMs=2592000000       # 分区时间跨度（毫秒，默认1个月）
-obkv.rangePartitionCount=1                     # Range 分区数量
-obkv.keyCount=10000                            # Key 数量（用于循环使用）
-```
+**测试模式说明**：
 
-**分区配置说明**:
-- `rangePartitionStartTs`: 第一个 Range 分区的起始时间戳（毫秒）
-- `rangePartitionDurationMs`: 每个 Range 分区的时间跨度（毫秒），默认 2592000000（30天）
-- `rangePartitionCount`: Range 分区的数量，应与建表时的分区数量一致
-- `keyCount`: Key 的总数量，用于确保 Key 在指定范围内循环使用
+- `obkv.isMultiVersionMode=false`：单版本模式，适合测试一级 range 分区表
+  - Key 生成：直接使用 YCSB 生成的 key
+  - Timestamp 生成：使用当前系统时间
+  - 数据分布：基于 K 列进行分区路由
+  
+- `obkv.isMultiVersionMode=true`：多版本模式，适合测试二级 range-key 分区表
+  - Key 生成：生成包含 key prefix 和 timestamp 的复合 key（格式：`user_%012d_<timestamp>`）
+  - Timestamp 生成：根据分区配置计算，确保数据均匀分布在各个 range 分区
+  - 数据分布：基于 G 列（ABS(T)）和 K_PREFIX 列进行分区路由
+
+**参数说明**：
+
+| 参数 | 类型 | 必填 | 适用模式 | 说明 |
+|------|------|------|----------|------|
+| `obkv.isMultiVersionMode` | boolean | 是 | 所有模式 | 测试模式开关，false=一级分区模式，true=二级分区模式 |
+| `obkv.rangePartitionStartTs` | long | 是（二级分区） | 二级分区模式 | 第一个 Range 分区的起始时间戳（毫秒），需与建表时的 `start_timestamp` 一致 |
+| `obkv.rangePartitionDurationMs` | long | 是（二级分区） | 二级分区模式 | 每个 Range 分区的时间跨度（毫秒），需与建表时的 `partition_duration_ms` 一致 |
+| `obkv.rangePartitionCount` | int | 是（二级分区） | 二级分区模式 | Range 分区的数量，需与建表时的分区数量一致 |
+| `obkv.keyCount` | int | 是（二级分区） | 二级分区模式 | Key 的总数量，用于确保 Key 在指定范围内循环使用 |
 
 #### 7. 其他配置
 
-```properties
-# 调试模式
-obkv.debug=false
-
-# 连接池大小
-server.connection.pool.size=20
-
-# 超时配置（毫秒）
-rpc.operation.timeout=10000
-rpc.execute.timeout=15000
-```
+| 参数 | 类型 | 必填 | 说明 | 默认值 |
+|------|------|------|------|--------|
+| `obkv.debug` | boolean | 否 | 调试模式开关 | false |
+| `server.connection.pool.size` | int | 否 | 连接池大小 | 20 |
+| `rpc.operation.timeout` | int | 否 | RPC 操作超时时间（毫秒） | 10000 |
+| `rpc.execute.timeout` | int | 否 | RPC 执行超时时间（毫秒） | 15000 |
 
 ---
 
@@ -258,27 +263,77 @@ cd obkv-hbase
 使用建表脚本生成 SQL 并执行：
 
 ```bash
-# 生成建表 SQL（默认输出到 stdout 和文件）
-./create_table.sh 1 40
+# 生成一级分区表 SQL（使用默认值）
+./create_table.sh --max_key 1000 --partition_count 4 --key_length 12
 
-# 或者指定参数
-./create_table.sh 1 40 1704067200000 2592000000
+# 生成二级分区表 SQL
+./create_table.sh --mode hbase --type sec_part --key_subpartition_count 40 --start_timestamp 1704067200000 --partition_duration_ms 2592000000
 
-# 查看生成的 SQL 文件
-cat ycsb_test_cf_r1_k40_d2592000000.sql
-
+# 查看生成的 SQL 文件（文件名会自动生成）
 # 在数据库中执行 SQL（根据实际情况调整）
-# mysql -h your_host -u your_user -p < ycsb_test_cf_r1_k40_d2592000000.sql
+# mysql -h your_host -u your_user -p < <生成的sql文件>
 ```
 
 ### 步骤 3: 配置 Workload 文件
 
-编辑 `workloads/workload_load` 文件，配置：
-- 连接信息（ODP 地址或直连参数）
-- 账户密码
-- 表名和列族
-- 分区配置（如果使用多版本模式）
-- 记录数量和操作数量
+编辑 `workloads/workload_load` 文件，根据你的表类型选择相应的配置，以ODP模式的一级分区表为例：
+
+**一级分区表配置示例（ODP 模式）**：
+
+```properties
+# ==========================================
+# 1. 基础配置
+# ==========================================
+recordcount=100000              # 数据加载阶段的记录数量
+operationcount=10000            # 运行阶段的操作数量
+fieldcount=10                   # 每条记录的字段数量
+fieldlength=100                 # 每个字段的长度（字节）
+threadcount=10                  # 并发线程数
+
+# ==========================================
+# 2. 操作比例配置（总和应为 1.0）
+# ==========================================
+readproportion=0.5             # 读取操作比例
+insertproportion=0.1            # 插入操作比例
+scanproportion=0.05             # 扫描操作比例
+batchputproportion=0            # 批量写入操作比例
+batchreadproportion=0           # 批量读取操作比例
+
+# ==========================================
+# 3. 批量操作配置
+# ==========================================
+batchput.size.per.op=10         # 每次批量写入的记录数
+batchread.size.per.op=10        # 每次批量读取的记录数
+
+# ==========================================
+# 4. 连接配置（ODP 模式）
+# ==========================================
+obkv.isOdpMode=true             # 连接模式：true=ODP模式, false=直连模式
+hbase.oceanbase.odpAddr=your_odp_address
+hbase.oceanbase.odpPort=your_odp_port
+hbase.oceanbase.fullUserName=your_full_user_name
+hbase.oceanbase.password=your_password
+hbase.oceanbase.database=your_database_name
+
+# ==========================================
+# 5. 表配置
+# ==========================================
+hbase.oceanbase.table=ycsb_test
+hbase.oceanbase.columnFamily=cf
+
+# ==========================================
+# 6. 分区配置（一级分区表）
+# ==========================================
+obkv.isMultiVersionMode=false   # 单版本模式，适合一级分区表
+
+# ==========================================
+# 7. 其他配置
+# ==========================================
+obkv.debug=false                # 调试模式开关
+server.connection.pool.size=20  # 连接池大小
+rpc.operation.timeout=10000     # RPC 操作超时时间（毫秒）
+rpc.execute.timeout=15000       # RPC 执行超时时间（毫秒）
+```
 
 ### 步骤 4: 运行测试
 
