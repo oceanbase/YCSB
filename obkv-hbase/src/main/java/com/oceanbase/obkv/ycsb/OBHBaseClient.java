@@ -426,7 +426,6 @@ public class OBHBaseClient extends DB {
         }
         return finalTs;
     }
-    
     private long genRangePartEndTs(String key) {
         // 将key转换为数值
         long keyValue;
