@@ -1,29 +1,11 @@
 #!/bin/bash
 #
 # =============================================================================
-# HBase-style test$cf table creation script
+# Table creation script for HBase and Timeseries models
 # =============================================================================
 #
-# This script generates CREATE TABLE SQL for ycsb_test$cf table with:
-# - Range partitions by G (ABS(T)) column
-# - Key subpartitions by K_PREFIX column
-# - Dynamic partition policy enabled
-#
-# Usage:
-#   ./create_table.sh <range_partition_count> <key_subpartition_count> [start_timestamp] [partition_duration_ms] [output_file]
-#
-# Parameters:
-#   range_partition_count    : Number of range partitions (required)
-#   key_subpartition_count   : Number of key subpartitions per range partition (required)
-#   start_timestamp          : Start timestamp (ms) or date string (optional, default: current time)
-#   partition_duration_ms   : Time span for each range partition in milliseconds (optional, default: 1 month = 2592000000 ms)
-#   output_file              : Optional output SQL file path (default: auto-generated filename)
-#
-# Examples:
-#   ./create_table.sh 4 40
-#   ./create_table.sh 4 40 1704067200000
-#   ./create_table.sh 4 40 1704067200000 2592000000
-#   ./create_table.sh 4 40 '2024-01-01 00:00:00' 2592000000 output.sql
+# This script generates CREATE TABLE SQL for both HBase and Timeseries models
+# with support for single-level (range) and double-level (range-key) partitions
 #
 # =============================================================================
 
@@ -31,108 +13,232 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Default values
+DEFAULT_PARTITION_DURATION_MS=86400000  # 1 day in milliseconds
+DEFAULT_TABLE_NAME_HBASE="ycsb_test"
+DEFAULT_FAMILY_HBASE="cf"
+DEFAULT_TABLE_NAME_TS="ycsb_test"
+DEFAULT_FAMILY_TS="ts_cf"
+
+# Global variables
+MODE=""
+PARTITION_TYPE=""
+MAX_KEY=""
+PARTITION_COUNT=""
+KEY_LENGTH=""
+START_TIMESTAMP=""
+PARTITION_DURATION_MS=""
+KEY_SUBPARTITION_COUNT=""
+TABLE_NAME=""
+FAMILY=""
+OUTPUT_FILE=""
+
+# =============================================================================
+# Help function
+# =============================================================================
+
 show_help() {
   cat <<'EOF'
 Usage:
-  create_table.sh <range_partition_count> <key_subpartition_count> [start_timestamp] [partition_duration_ms] [output_file]
+  create_table.sh [OPTIONS]
 
-Parameters:
-  range_partition_count    : Number of range partitions (required)
-  key_subpartition_count   : Number of key subpartitions per range partition (required)
-  start_timestamp          : Start timestamp (ms) or date string (optional, default: current time)
-  partition_duration_ms   : Time span for each range partition in milliseconds (optional, default: 1 month = 2592000000 ms)
-  output_file              : Optional output SQL file path (default: auto-generated filename)
+Options:
+  --mode MODE                    Model type: 'hbase' or 'timeseries' (optional, default: hbase)
+  --type TYPE                    Partition type: 'first_part' or 'sec_part' (optional, default: first_part)
+  
+  For first-level partition (--type first_part):
+    --max_key MAX_KEY            Maximum key value (required)
+    --partition_count COUNT      Number of partitions (required)
+    --key_length LENGTH          Key length for formatting (required)
+  
+  For second-level partition (--type sec_part):
+    --start_timestamp TS         Start timestamp (ms) or date string (optional, default: current time)
+    --partition_duration_ms MS  Partition time span in milliseconds (optional, default: 86400000 = 1 day)
+    --key_subpartition_count N  Number of key subpartitions (required)
+  
+  Common options:
+    --table_name NAME           Table name (optional, default: ycsb_test)
+    --family FAMILY             Column family name (optional, default: hbase=cf, timeseries=ts_cf)
+    --output_file FILE          Output SQL file path (optional, auto-generated)
+    --help                      Show this help message
 
 Examples:
-  create_table.sh 1 40
-  create_table.sh 1 40 1704067200000
-  create_table.sh 1 40 1704067200000 2592000000
-  create_table.sh 1 40 '2024-01-01 00:00:00' 2592000000 output.sql
+  # HBase first-level partition (using defaults)
+  ./create_table.sh --max_key 1000 --partition_count 4 --key_length 12
+  
+  # HBase first-level partition (explicit)
+  ./create_table.sh --mode hbase --type first_part --max_key 1000 --partition_count 4 --key_length 12
+  
+  # HBase second-level partition
+  ./create_table.sh --mode hbase --type sec_part --key_subpartition_count 40 --start_timestamp 1704067200000
+  
+  # Timeseries first-level partition
+  ./create_table.sh --mode timeseries --type first_part --max_key 1000 --partition_count 4 --key_length 12
+  
+  # Timeseries second-level partition
+  ./create_table.sh --mode timeseries --type sec_part --key_subpartition_count 40 --start_timestamp 1704067200000 --partition_duration_ms 2592000000
+  
+  # With custom table name and output file
+  ./create_table.sh --max_key 1000 --partition_count 4 --key_length 12 --table_name mytable --family mycf --output_file mytable.sql
 EOF
 }
 
-if [[ $# -lt 2 ]]; then
-  show_help
-  exit 1
-fi
+# =============================================================================
+# Parameter parsing
+# =============================================================================
 
-RANGE_PARTITION_COUNT="$1"
-KEY_SUBPARTITION_COUNT="$2"
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mode)
+        MODE="$2"
+        shift 2
+        ;;
+      --type)
+        PARTITION_TYPE="$2"
+        shift 2
+        ;;
+      --max_key)
+        MAX_KEY="$2"
+        shift 2
+        ;;
+      --partition_count)
+        PARTITION_COUNT="$2"
+        shift 2
+        ;;
+      --key_length)
+        KEY_LENGTH="$2"
+        shift 2
+        ;;
+      --start_timestamp)
+        START_TIMESTAMP="$2"
+        shift 2
+        ;;
+      --partition_duration_ms)
+        PARTITION_DURATION_MS="$2"
+        shift 2
+        ;;
+      --key_subpartition_count)
+        KEY_SUBPARTITION_COUNT="$2"
+        shift 2
+        ;;
+      --table_name)
+        TABLE_NAME="$2"
+        shift 2
+        ;;
+      --family)
+        FAMILY="$2"
+        shift 2
+        ;;
+      --output_file)
+        OUTPUT_FILE="$2"
+        shift 2
+        ;;
+      --help|-h)
+        show_help
+        exit 0
+        ;;
+      *)
+        echo "Error: Unknown option: $1" >&2
+        show_help
+        exit 1
+        ;;
+    esac
+  done
 
-# Default values
-# One month in milliseconds: 30 days * 24 hours * 60 minutes * 60 seconds * 1000 ms
-DEFAULT_PARTITION_DURATION_MS=2592000000
-
-# Parse optional parameters
-START_TIMESTAMP=""
-PARTITION_DURATION_MS=""
-OUTPUT_FILE=""
-
-# Get current time for comparison (in milliseconds)
-CURRENT_TS_MS=$(($(date +%s) * 1000))
-
-# Parse remaining arguments
-if [[ $# -ge 3 ]]; then
-  # Check if arg3 is a number (could be timestamp or duration)
-  if [[ "$3" =~ ^[0-9]+$ ]]; then
-    # Check if it's a reasonable timestamp (after 2000-01-01 and not too far in future)
-    # Timestamps after 2000-01-01 are > 946684800000
-    # If it's larger than current time + 10 years, it's likely a duration
-    FUTURE_LIMIT=$((CURRENT_TS_MS + 10 * 365 * 24 * 60 * 60 * 1000))
-    if [[ "$3" -gt 946684800000 ]] && [[ "$3" -lt $FUTURE_LIMIT ]]; then
-      # Likely a timestamp
-      START_TIMESTAMP="$3"
-      if [[ $# -ge 4 ]]; then
-        if [[ "$4" =~ ^[0-9]+$ ]]; then
-          PARTITION_DURATION_MS="$4"
-          OUTPUT_FILE="${5:-}"
-        else
-          OUTPUT_FILE="$4"
-        fi
-      fi
-    else
-      # Likely a duration (could be small number or very large number)
-      PARTITION_DURATION_MS="$3"
-      OUTPUT_FILE="${4:-}"
-    fi
-  elif [[ "$3" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]]; then
-    # Date string - definitely a timestamp
-    START_TIMESTAMP="$3"
-    if [[ $# -ge 4 ]]; then
-      if [[ "$4" =~ ^[0-9]+$ ]]; then
-        PARTITION_DURATION_MS="$4"
-        OUTPUT_FILE="${5:-}"
-      else
-        OUTPUT_FILE="$4"
-      fi
-    fi
-  else
-    # Not a number or date string - must be output file
-    OUTPUT_FILE="$3"
+  # Set defaults
+  if [[ -z "$MODE" ]]; then
+    MODE="hbase"
   fi
-fi
 
-# Validate required parameters
-if ! [[ "$RANGE_PARTITION_COUNT" =~ ^[0-9]+$ ]] || [[ "$RANGE_PARTITION_COUNT" -le 0 ]]; then
-  echo "Error: range_partition_count must be a positive integer" >&2
-  exit 1
-fi
+  if [[ -z "$PARTITION_TYPE" ]]; then
+    PARTITION_TYPE="first_part"
+  fi
 
+  # Validate mode
+  if [[ "$MODE" != "hbase" && "$MODE" != "timeseries" ]]; then
+    echo "Error: --mode must be 'hbase' or 'timeseries'" >&2
+    exit 1
+  fi
+
+  # Validate partition type
+  if [[ "$PARTITION_TYPE" != "first_part" && "$PARTITION_TYPE" != "sec_part" ]]; then
+    echo "Error: --type must be 'first_part' or 'sec_part'" >&2
+    exit 1
+  fi
+
+  # Validate first-level partition parameters
+  if [[ "$PARTITION_TYPE" == "first_part" ]]; then
+    if [[ -z "$MAX_KEY" ]]; then
+      echo "Error: --max_key is required for first-level partition" >&2
+      exit 1
+    fi
+    if ! [[ "$MAX_KEY" =~ ^[0-9]+$ ]] || [[ "$MAX_KEY" -le 0 ]]; then
+      echo "Error: --max_key must be a positive integer" >&2
+      exit 1
+    fi
+
+    if [[ -z "$PARTITION_COUNT" ]]; then
+      echo "Error: --partition_count is required for first-level partition" >&2
+      exit 1
+    fi
+    if ! [[ "$PARTITION_COUNT" =~ ^[0-9]+$ ]] || [[ "$PARTITION_COUNT" -le 0 ]]; then
+      echo "Error: --partition_count must be a positive integer" >&2
+      exit 1
+    fi
+
+    if [[ -z "$KEY_LENGTH" ]]; then
+      echo "Error: --key_length is required for first-level partition" >&2
+      exit 1
+    fi
+    if ! [[ "$KEY_LENGTH" =~ ^[0-9]+$ ]] || [[ "$KEY_LENGTH" -le 0 ]]; then
+      echo "Error: --key_length must be a positive integer" >&2
+      exit 1
+    fi
+  fi
+
+  # Validate second-level partition parameters
+  if [[ "$PARTITION_TYPE" == "sec_part" ]]; then
+    if [[ -z "$KEY_SUBPARTITION_COUNT" ]]; then
+      echo "Error: --key_subpartition_count is required for second-level partition" >&2
+      exit 1
+    fi
 if ! [[ "$KEY_SUBPARTITION_COUNT" =~ ^[0-9]+$ ]] || [[ "$KEY_SUBPARTITION_COUNT" -le 0 ]]; then
-  echo "Error: key_subpartition_count must be a positive integer" >&2
+      echo "Error: --key_subpartition_count must be a positive integer" >&2
   exit 1
 fi
 
-# Set defaults if not provided
+    # Set default partition_duration_ms if not provided
 if [[ -z "$PARTITION_DURATION_MS" ]]; then
   PARTITION_DURATION_MS="$DEFAULT_PARTITION_DURATION_MS"
 fi
-
-# Validate partition_duration_ms
 if ! [[ "$PARTITION_DURATION_MS" =~ ^[0-9]+$ ]] || [[ "$PARTITION_DURATION_MS" -le 0 ]]; then
-  echo "Error: partition_duration_ms must be a positive integer" >&2
+      echo "Error: --partition_duration_ms must be a positive integer" >&2
   exit 1
 fi
+  fi
+
+  # Set default table name and family
+  if [[ -z "$TABLE_NAME" ]]; then
+    if [[ "$MODE" == "hbase" ]]; then
+      TABLE_NAME="$DEFAULT_TABLE_NAME_HBASE"
+    else
+      TABLE_NAME="$DEFAULT_TABLE_NAME_TS"
+    fi
+  fi
+
+  if [[ -z "$FAMILY" ]]; then
+    if [[ "$MODE" == "hbase" ]]; then
+      FAMILY="$DEFAULT_FAMILY_HBASE"
+    else
+      FAMILY="$DEFAULT_FAMILY_TS"
+    fi
+  fi
+}
+
+# =============================================================================
+# Utility functions
+# =============================================================================
 
 # Get current time in milliseconds
 get_current_timestamp_ms() {
@@ -180,115 +286,314 @@ convert_timestamp_to_date() {
   fi
 }
 
-# Parse or use current time as start timestamp
-if [[ -n "$START_TIMESTAMP" ]]; then
-  START_TS_MS="$(parse_start_timestamp_ms "$START_TIMESTAMP")"
-else
-  START_TS_MS="$(get_current_timestamp_ms)"
-fi
+# Format key as string with specified length (left-padded with zeros)
+format_key() {
+  local key_value="$1"
+  local length="$2"
+  printf "%0${length}d" "$key_value"
+}
 
-# Generate output file name if not provided
-# Default behavior: output to both stdout and a file
-if [[ -z "$OUTPUT_FILE" ]]; then
-  OUTPUT_FILE="${SCRIPT_DIR}/ycsb_test_cf_r${RANGE_PARTITION_COUNT}_k${KEY_SUBPARTITION_COUNT}_d${PARTITION_DURATION_MS}.sql"
-fi
+# Generate output filename
+generate_filename() {
+  local table="$1"
+  local mode="$2"
+  local range_count="${3:-0}"
+  local key_count="${4:-0}"
+  local current_ts=$(date +%s)
+  
+  echo "${table}_${mode}_r${range_count}_k${key_count}_${current_ts}.sql"
+}
 
-# Calculate derived parameters
-PARTITION_DURATION_DAYS=$((PARTITION_DURATION_MS / 1000 / 60 / 60 / 24))
-PARTITION_DURATION_HOURS=$((PARTITION_DURATION_MS / 1000 / 60 / 60))
-PARTITION_DURATION_MINUTES=$((PARTITION_DURATION_MS / 1000 / 60))
-START_TIMESTAMP_FORMATTED="$(convert_timestamp_to_date "$START_TS_MS")"
+# =============================================================================
+# SQL Generation Functions
+# =============================================================================
 
-# Prepare parameter display strings
-if [[ -z "$START_TIMESTAMP" ]]; then
-  START_TIMESTAMP_DISPLAY="<default: current time>"
-else
-  START_TIMESTAMP_DISPLAY="$START_TIMESTAMP"
-fi
-
-if [[ "$PARTITION_DURATION_MS" = "$DEFAULT_PARTITION_DURATION_MS" ]]; then
-  PARTITION_DURATION_DISPLAY="${PARTITION_DURATION_MS} (default: 1 month)"
-else
-  PARTITION_DURATION_DISPLAY="$PARTITION_DURATION_MS"
-fi
-
-# Generate SQL output
-generate_sql() {
+# Generate HBase single-level partition SQL
+generate_hbase_single_partition() {
+  local table_name="$1"
+  local family="$2"
+  local max_key="$3"
+  local partition_count="$4"
+  local key_length="$5"
+  
+  local step=$((max_key / partition_count))
+  local full_table_name="\`${table_name}\$${family}\`"
+  
   cat <<EOF
 -- =============================================================================
--- HBase-style ycsb_test\$cf table creation SQL
+-- HBase single-level range partition table
 -- Generated by: $0
 -- Generation time: $(date '+%Y-%m-%d %H:%M:%S')
 -- =============================================================================
 --
--- Input Parameters:
---   range_partition_count    : ${RANGE_PARTITION_COUNT}
---   key_subpartition_count   : ${KEY_SUBPARTITION_COUNT}
---   start_timestamp          : ${START_TIMESTAMP_DISPLAY}
---   partition_duration_ms    : ${PARTITION_DURATION_DISPLAY}
---
--- Derived Parameters:
---   start_ts_ms              : ${START_TS_MS}
---   start_timestamp_formatted: ${START_TIMESTAMP_FORMATTED}
---   partition_duration_days   : ${PARTITION_DURATION_DAYS}
---   partition_duration_hours  : ${PARTITION_DURATION_HOURS}
---   partition_duration_minutes: ${PARTITION_DURATION_MINUTES}
---
--- Table Structure:
---   - Range partitions by G column (G = ABS(T))
---   - Key subpartitions by K_PREFIX column (K_PREFIX = substring(K, 1, 5))
---   - Dynamic partition policy enabled
+-- Parameters:
+--   Table name: ${table_name}
+--   Family: ${family}
+--   Max key: ${max_key}
+--   Partition count: ${partition_count}
+--   Key length: ${key_length}
 --
 -- =============================================================================
 
-CREATE TABLEGROUP ycsb_test;
-
-CREATE TABLE \`ycsb_test\$cf\` (
+CREATE TABLE ${full_table_name} (
   \`K\` varbinary(1024) NOT NULL,
   \`Q\` varbinary(256) NOT NULL,
   \`T\` bigint(20) NOT NULL,
-  \`V\` varbinary(10240) DEFAULT NULL,
-  \`G\` bigint(20) GENERATED ALWAYS AS (ABS(T)),
-  \`K_PREFIX\` varbinary(1024) generated always as (substring(\`K\`, 1, 18)),
+  \`V\` varbinary(1024) DEFAULT NULL,
   PRIMARY KEY (\`K\`, \`Q\`, \`T\`)
-) TABLEGROUP =  ycsb_test
-  kv_attributes ='{"HBase": {}}'
-  enable_macro_block_bloom_filter = True
-  DYNAMIC_PARTITION_POLICY(
-    ENABLE = true,
-    TIME_UNIT = 'month',
-    PRECREATE_TIME = '1 month',
-    EXPIRE_TIME = '1 month',
-    BIGINT_PRECISION = 'ms')
-  PARTITION BY RANGE COLUMNS(\`G\`) SUBPARTITION BY KEY(\`K_PREFIX\`) SUBPARTITIONS ${KEY_SUBPARTITION_COUNT} (
+) PARTITION BY RANGE COLUMNS(\`K\`) (
 EOF
 
-  # Generate partition definitions
-  # First partition boundary: start_time + 1 * partition_duration (e.g., start_time + 1 month)
-  # Subsequent partitions: start_time + (i+1) * partition_duration
   local i
-  for ((i = 0; i < RANGE_PARTITION_COUNT; i++)); do
-    # Partition boundary = start_time + (partition_index + 1) * duration
-    # p0: start_time + 1 * duration, p1: start_time + 2 * duration, etc.
-    local partition_boundary=$((START_TS_MS + (i + 1) * PARTITION_DURATION_MS))
-    local partition_boundary_date
-    partition_boundary_date="$(convert_timestamp_to_date "$partition_boundary")"
+  for ((i = 0; i < partition_count; i++)); do
+    local boundary=$(((i + 1) * step))
+    local formatted_key=$(format_key "$boundary" "$key_length")
     
-    if [[ "$i" -eq $((RANGE_PARTITION_COUNT - 1)) ]]; then
-      # Last partition: no comma
-      echo "    PARTITION \`p${i}\` VALUES LESS THAN (${partition_boundary})  -- ${partition_boundary_date} (${partition_boundary} ms)"
+    if [[ "$i" -eq $((partition_count - 1)) ]]; then
+      echo "  PARTITION \`p${i}\` VALUES LESS THAN (MAXVALUE)"
     else
-      # Other partitions: comma before comment
-      echo "    PARTITION \`p${i}\` VALUES LESS THAN (${partition_boundary}),  -- ${partition_boundary_date} (${partition_boundary} ms)"
+      echo "  PARTITION \`p${i}\` VALUES LESS THAN ('${formatted_key}'),"
     fi
   done
+
+  cat <<EOF
+);
+EOF
+}
+
+# Generate HBase double-level partition SQL
+generate_hbase_double_partition() {
+  local table_name="$1"
+  local family="$2"
+  local start_ts_ms="$3"
+  local partition_duration_ms="$4"
+  local key_subpartition_count="$5"
+  local range_partition_count="${6:-1}"
+  
+  local full_table_name="\`${table_name}\$${family}\`"
+  local start_ts_formatted=$(convert_timestamp_to_date "$start_ts_ms")
+  
+  cat <<EOF
+-- =============================================================================
+-- HBase double-level range-key partition table
+-- Generated by: $0
+-- Generation time: $(date '+%Y-%m-%d %H:%M:%S')
+-- =============================================================================
+--
+-- Parameters:
+--   Table name: ${table_name}
+--   Family: ${family}
+--   Start timestamp: ${start_ts_ms} (${start_ts_formatted})
+--   Partition duration: ${partition_duration_ms} ms
+--   Key subpartition count: ${key_subpartition_count}
+--   Range partition count: ${range_partition_count}
+--
+-- =============================================================================
+
+CREATE TABLE ${full_table_name} (
+  \`K\` varbinary(1024) NOT NULL,
+  \`Q\` varbinary(256) NOT NULL,
+  \`T\` bigint(20) NOT NULL,
+  \`V\` varbinary(1024) DEFAULT NULL,
+  \`G\` bigint(20) GENERATED ALWAYS AS (ABS(\`T\`)),
+  \`K_PREFIX\` varbinary(1024) generated always as (substring(\`K\`, 1, 16)),
+  PRIMARY KEY (\`K\`, \`Q\`, \`T\`)
+) PARTITION BY RANGE COLUMNS(\`G\`) SUBPARTITION BY KEY(\`K_PREFIX\`) SUBPARTITIONS ${key_subpartition_count} (
+EOF
+
+  local i
+  # Generate range partitions
+  # First partition (i=0): boundary = start_timestamp + partition_duration
+  # Second partition (i=1): boundary = start_timestamp + 2 * partition_duration
+  # And so on...
+  for ((i = 0; i < range_partition_count; i++)); do
+    local partition_boundary=$((start_ts_ms + (i + 1) * partition_duration_ms))
+    local partition_boundary_date=$(convert_timestamp_to_date "$partition_boundary")
+    echo "  PARTITION \`p${i}\` VALUES LESS THAN (${partition_boundary}),  -- ${partition_boundary_date} (${partition_boundary} ms)"
+  done
+  
+  # Add MAXVALUE partition
+  echo "  PARTITION \`p${range_partition_count}\` VALUES LESS THAN (MAXVALUE)"
+
+  cat <<EOF
+);
+EOF
+}
+
+# Generate Timeseries single-level partition SQL
+generate_timeseries_single_partition() {
+  local table_name="$1"
+  local family="$2"
+  local max_key="$3"
+  local partition_count="$4"
+  local key_length="$5"
+  
+  local step=$((max_key / partition_count))
+  local full_table_name="\`${table_name}\$${family}\`"
+  
+  cat <<EOF
+-- =============================================================================
+-- Timeseries single-level range partition table
+-- Generated by: $0
+-- Generation time: $(date '+%Y-%m-%d %H:%M:%S')
+-- =============================================================================
+--
+-- Parameters:
+--   Table name: ${table_name}
+--   Family: ${family}
+--   Max key: ${max_key}
+--   Partition count: ${partition_count}
+--   Key length: ${key_length}
+--
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS ${full_table_name} (
+  \`K\` varbinary(1024) NOT NULL,
+  \`T\` bigint(20) NOT NULL,
+  \`S\` bigint(20) NOT NULL,
+  \`V\` json NOT NULL,
+  PRIMARY KEY (\`K\`, \`T\`, \`S\`)
+) PARTITION BY RANGE COLUMNS(\`K\`) (
+EOF
+
+  local i
+  for ((i = 0; i < partition_count; i++)); do
+    local boundary=$(((i + 1) * step))
+    local formatted_key=$(format_key "$boundary" "$key_length")
+    
+    if [[ "$i" -eq $((partition_count - 1)) ]]; then
+      echo "  PARTITION \`p${i}\` VALUES LESS THAN (MAXVALUE)"
+    else
+      echo "  PARTITION \`p${i}\` VALUES LESS THAN ('${formatted_key}'),"
+    fi
+  done
+
+  cat <<EOF
+);
+EOF
+}
+
+# Generate Timeseries double-level partition SQL
+generate_timeseries_double_partition() {
+  local table_name="$1"
+  local family="$2"
+  local start_ts_ms="$3"
+  local partition_duration_ms="$4"
+  local key_subpartition_count="$5"
+  local range_partition_count="${6:-1}"
+  
+  local full_table_name="\`${table_name}\$${family}\`"
+  local start_ts_formatted=$(convert_timestamp_to_date "$start_ts_ms")
+  
+  cat <<EOF
+-- =============================================================================
+-- Timeseries double-level range-key partition table
+-- Generated by: $0
+-- Generation time: $(date '+%Y-%m-%d %H:%M:%S')
+-- =============================================================================
+--
+-- Parameters:
+--   Table name: ${table_name}
+--   Family: ${family}
+--   Start timestamp: ${start_ts_ms} (${start_ts_formatted})
+--   Partition duration: ${partition_duration_ms} ms
+--   Key subpartition count: ${key_subpartition_count}
+--   Range partition count: ${range_partition_count}
+--
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS ${full_table_name} (
+  \`K\` varbinary(1024) NOT NULL,
+  \`T\` bigint(20) NOT NULL,
+  \`S\` bigint(20) NOT NULL,
+  \`V\` json NOT NULL,
+  \`G\` bigint(20) GENERATED ALWAYS AS (ABS(\`T\`)),
+  \`K_PREFIX\` varbinary(1024) generated always as (substring(\`K\`, 1, 16)),
+  PRIMARY KEY (\`K\`, \`T\`, \`S\`)
+) PARTITION BY RANGE COLUMNS(\`G\`) SUBPARTITION BY KEY(\`K_PREFIX\`) SUBPARTITIONS ${key_subpartition_count} (
+EOF
+
+  local i
+  # Generate range partitions
+  # First partition (i=0): boundary = start_timestamp + partition_duration
+  # Second partition (i=1): boundary = start_timestamp + 2 * partition_duration
+  # And so on...
+  for ((i = 0; i < range_partition_count; i++)); do
+    local partition_boundary=$((start_ts_ms + (i + 1) * partition_duration_ms))
+    local partition_boundary_date=$(convert_timestamp_to_date "$partition_boundary")
+    echo "  PARTITION \`p${i}\` VALUES LESS THAN (${partition_boundary}),  -- ${partition_boundary_date} (${partition_boundary} ms)"
+  done
+  
+  # Add MAXVALUE partition
+  echo "  PARTITION \`p${range_partition_count}\` VALUES LESS THAN (MAXVALUE)"
 
   cat <<EOF
   );
 EOF
 }
 
-# Output SQL: default to both stdout and file
-# Use tee to output to both stdout and file simultaneously
-generate_sql | tee "$OUTPUT_FILE"
+# =============================================================================
+# Main logic
+# =============================================================================
+
+main() {
+  # Parse arguments
+  if [[ $# -eq 0 ]]; then
+    show_help
+    exit 1
+  fi
+
+  parse_args "$@"
+
+  # Parse or use current time as start timestamp for second-level partition
+  local start_ts_ms=""
+  if [[ "$PARTITION_TYPE" == "sec_part" ]]; then
+    if [[ -n "$START_TIMESTAMP" ]]; then
+      start_ts_ms=$(parse_start_timestamp_ms "$START_TIMESTAMP")
+    else
+      start_ts_ms=$(get_current_timestamp_ms)
+    fi
+  fi
+
+  # Generate output filename if not provided
+  if [[ -z "$OUTPUT_FILE" ]]; then
+    local range_count=0
+    local key_count=0
+    local start_ts=0
+    local duration=0
+    
+    if [[ "$PARTITION_TYPE" == "first_part" ]]; then
+      range_count="$PARTITION_COUNT"
+      key_count=0
+      start_ts=0
+      duration=0
+    else
+      range_count=1  # Default for second-level partition
+      key_count="$KEY_SUBPARTITION_COUNT"
+      start_ts="$start_ts_ms"
+      duration="$PARTITION_DURATION_MS"
+    fi
+    
+    OUTPUT_FILE="${SCRIPT_DIR}/$(generate_filename "$TABLE_NAME" "$MODE" "$range_count" "$key_count" "$start_ts" "$duration")"
+  fi
+
+  # Generate SQL based on mode and type
+  if [[ "$MODE" == "hbase" ]]; then
+    if [[ "$PARTITION_TYPE" == "first_part" ]]; then
+      generate_hbase_single_partition "$TABLE_NAME" "$FAMILY" "$MAX_KEY" "$PARTITION_COUNT" "$KEY_LENGTH" | tee "$OUTPUT_FILE"
+    else
+      generate_hbase_double_partition "$TABLE_NAME" "$FAMILY" "$start_ts_ms" "$PARTITION_DURATION_MS" "$KEY_SUBPARTITION_COUNT" | tee "$OUTPUT_FILE"
+    fi
+  else
+    if [[ "$PARTITION_TYPE" == "first_part" ]]; then
+      generate_timeseries_single_partition "$TABLE_NAME" "$FAMILY" "$MAX_KEY" "$PARTITION_COUNT" "$KEY_LENGTH" | tee "$OUTPUT_FILE"
+    else
+      generate_timeseries_double_partition "$TABLE_NAME" "$FAMILY" "$start_ts_ms" "$PARTITION_DURATION_MS" "$KEY_SUBPARTITION_COUNT" | tee "$OUTPUT_FILE"
+    fi
+  fi
+
 echo "SQL also saved to: $OUTPUT_FILE" >&2
+}
+
+# Run main function
+main "$@"
