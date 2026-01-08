@@ -186,7 +186,7 @@ batchread.size.per.op=10    # 每次批量读取的记录数
 
 ```properties
 # 连接模式（true=ODP模式, false=直连模式）
-obkv.isOdpMode=true
+hbase.oceanbase.odpMode=true
 
 ##### ODP 模式必填 #####
 hbase.oceanbase.odpAddr=your_odp_address
