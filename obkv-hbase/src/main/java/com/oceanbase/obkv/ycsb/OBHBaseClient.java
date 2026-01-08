@@ -36,7 +36,7 @@ public class OBHBaseClient extends DB {
     public static final String PROP_KEY_PARTITION_DURATION_MS   = "obkv.rangePartitionDurationMs";
     public static final String PROP_KEY_PARTITION_COUNT         = "obkv.rangePartitionCount";
     public static final String PROP_KEY_COUNT                   = "obkv.keyCount";
-    public static final String PROP_IS_MULTI_VERSION_MODE      = "obkv.isMultiVersionMode";
+    public static final String PROP_ENABLE_TIME_RANGE_TEST_MODE = "obkv.enableTimeRangeTestMode";
 
     public static final String COLUMN_FAMILY = "hbase.oceanbase.columnFamily";
     public static final String TABLE         = "hbase.oceanbase.table";
@@ -56,7 +56,7 @@ public class OBHBaseClient extends DB {
     private long partitionDurationMs = 0;  // 每个range分区的时间长度（毫秒）
     private int partitionCount = 0;  // 一级range分区的数量
     private int keyCount = 1;  // id的总数量
-    private boolean isMultiVersionMode = false;  // 是否使用多版本模式
+    private boolean enableTimeRangeTestMode = false;  // 是否启用时间范围测试模式
 
     @Override
     public void cleanup() throws DBException {
@@ -80,8 +80,8 @@ public class OBHBaseClient extends DB {
         tableName = getProperties().getProperty(TABLE);
         columnFamilyBytes = Bytes.toBytes(columnFamily);
         System.out.println("columnFamily: " + columnFamily + ", table: " + tableName + ", debug: " + debug + ", isObkv: " + isObkv);
-        isMultiVersionMode = Boolean.parseBoolean(getProperties().getProperty(PROP_IS_MULTI_VERSION_MODE, "false"));
-        if (isMultiVersionMode) {
+        enableTimeRangeTestMode = Boolean.parseBoolean(getProperties().getProperty(PROP_ENABLE_TIME_RANGE_TEST_MODE, "false"));
+        if (enableTimeRangeTestMode) {
             initPartitionConfig();
         }
         Configuration config = HBaseConfiguration.create();
@@ -319,7 +319,7 @@ public class OBHBaseClient extends DB {
      * @return K 字符串，长度为 36
      */
      private String generateK(String key) {
-        if (!isMultiVersionMode) {
+        if (!enableTimeRangeTestMode) {
             return key;
         }
 
@@ -358,7 +358,7 @@ public class OBHBaseClient extends DB {
      */
     private Long generateTs(String key) {
         // 如果未配置分区参数，使用当前系统时间
-        if (!isMultiVersionMode || partitionCount <= 0 || partitionDurationMs <= 0) {
+        if (!enableTimeRangeTestMode || partitionCount <= 0 || partitionDurationMs <= 0) {
             return System.currentTimeMillis();
         }
         
@@ -477,7 +477,7 @@ public class OBHBaseClient extends DB {
                 System.out.println("Doing read for key: " + key);
             }
             Get g = new Get(Bytes.toBytes(generateK(key)));
-            // if (isMultiVersionMode) {
+            // if (enableTimeRangeTestMode) {
             //     g.setTimeRange(genRangePartStartTs(key), genRangePartEndTs(key));
             // }
             if (fields == null) {
@@ -521,7 +521,7 @@ public class OBHBaseClient extends DB {
         try {
             Scan scan = new Scan();
             scan.setCaching(recordcount);
-            if (isMultiVersionMode) {
+            if (enableTimeRangeTestMode) {
                 scan.setStartRow(Bytes.toBytes(generateKeyPrefix(startkey) + "0"));
                 scan.setStopRow(Bytes.toBytes(generateKeyPrefix(startkey) + "9"));
                 scan.setTimeRange(genRangePartStartTs(startkey), genRangePartEndTs(startkey));
@@ -602,7 +602,7 @@ public class OBHBaseClient extends DB {
                 System.out.println("Adding field/value " + entry.getKey() + "/" + entry.getValue()// NOPMD
                                    + " to put request");// NOPMD
             }
-            if (isMultiVersionMode) {
+            if (enableTimeRangeTestMode) {
                 p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), generateTs(key), entry.getValue().toArray());
             } else {
                 p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), entry.getValue().toArray());
@@ -658,7 +658,7 @@ public class OBHBaseClient extends DB {
         valuesMap.forEach((key, values) -> {
             Put put = new Put(generateK(key).getBytes());
             values.forEach((k, v) -> {
-                if (isMultiVersionMode) {
+                if (enableTimeRangeTestMode) {
                     put.addColumn(columnFamilyBytes, k.getBytes(), generateTs(key), v.toArray());
                 } else {
                     put.addColumn(columnFamilyBytes, k.getBytes(), v.toArray());

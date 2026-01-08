@@ -212,31 +212,60 @@ Workload 配置文件位于 `workloads/` 目录下，包括：
 | `hbase.oceanbase.table` | string | 是 | 表名（不含列族） | - |
 | `hbase.oceanbase.columnFamily` | string | 是 | 列族名 | - |
 
-#### 6. 分区配置
+#### 6. 分区配置与时间范围测试模式
 
-测试负载根据 `obkv.isMultiVersionMode` 参数分为两种模式，分别适用于不同的表类型：
+时间范围测试模式（`obkv.enableTimeRangeTestMode`）用于测试基于时间戳的分区表性能。启用该模式后，系统会：
+
+1. **基于分区配置生成时间戳**: 根据分区参数计算时间戳，确保数据均匀分布到不同的 Range 分区
+2. **写入时指定时间戳**: 在写入数据时，为每个 cell 指定计算出的时间戳（而非使用当前系统时间）
+3. **扫描时使用时间范围**: 在扫描操作时，自动设置时间范围查询，只查询特定时间窗口内的数据
+4. **Key 生成策略**: 生成 key 时会将时间戳附加到 key 上，确保数据按时间分布
+
+**配置项**:
+
+测试负载根据 `obkv.enableTimeRangeTestMode` 参数分为两种模式，分别适用于不同的表类型：
 
 **测试模式说明**：
 
-- `obkv.isMultiVersionMode=false`：单版本模式，适合测试一级 range 分区表
+- `obkv.enableTimeRangeTestMode=false`：标准模式，适合测试一级 range 分区表
   - Key 生成：直接使用 YCSB 生成的 key
   - Timestamp 生成：使用当前系统时间
   - 数据分布：基于 K 列进行分区路由
+  - 适用场景：测试基于 key 的一级分区表性能，无需时间范围查询
   
-- `obkv.isMultiVersionMode=true`：多版本模式，适合测试二级 range-key 分区表
+- `obkv.enableTimeRangeTestMode=true`：时间范围测试模式，适合测试二级 range-key 分区表
   - Key 生成：生成包含 key prefix 和 timestamp 的复合 key（格式：`user_%012d_<timestamp>`）
   - Timestamp 生成：根据分区配置计算，确保数据均匀分布在各个 range 分区
   - 数据分布：基于 G 列（ABS(T)）和 K_PREFIX 列进行分区路由
+  - 时间范围查询：扫描操作会自动设置时间范围，只查询特定时间窗口内的数据
+  - 适用场景：测试基于时间戳的二级分区表性能，需要时间范围查询的场景
 
 **参数说明**：
 
 | 参数 | 类型 | 必填 | 适用模式 | 说明 |
 |------|------|------|----------|------|
-| `obkv.isMultiVersionMode` | boolean | 是 | 所有模式 | 测试模式开关，false=一级分区模式，true=二级分区模式 |
-| `obkv.rangePartitionStartTs` | long | 是（二级分区） | 二级分区模式 | 第一个 Range 分区的起始时间戳（毫秒），需与建表时的 `start_timestamp` 一致 |
-| `obkv.rangePartitionDurationMs` | long | 是（二级分区） | 二级分区模式 | 每个 Range 分区的时间跨度（毫秒），需与建表时的 `partition_duration_ms` 一致 |
-| `obkv.rangePartitionCount` | int | 是（二级分区） | 二级分区模式 | Range 分区的数量，需与建表时的分区数量一致 |
-| `obkv.keyCount` | int | 是（二级分区） | 二级分区模式 | Key 的总数量，用于确保 Key 在指定范围内循环使用 |
+| `obkv.enableTimeRangeTestMode` | boolean | 是 | 所有模式 | 时间范围测试模式开关，false=标准模式（一级分区），true=时间范围测试模式（二级分区） |
+| `obkv.rangePartitionStartTs` | long | 是（时间范围模式） | 时间范围测试模式 | 第一个 Range 分区的起始时间戳（毫秒），需与建表时的 `start_timestamp` 一致 |
+| `obkv.rangePartitionDurationMs` | long | 是（时间范围模式） | 时间范围测试模式 | 每个 Range 分区的时间跨度（毫秒），需与建表时的 `partition_duration_ms` 一致 |
+| `obkv.rangePartitionCount` | int | 是（时间范围模式） | 时间范围测试模式 | Range 分区的数量，需与建表时的分区数量一致 |
+| `obkv.keyCount` | int | 是（时间范围模式） | 时间范围测试模式 | Key 的总数量，用于确保 Key 在指定范围内循环使用 |
+
+**使用场景**:
+- 测试基于时间戳的 Range 分区表性能
+- 验证数据在不同时间分区中的分布情况
+- 测试时间范围查询的性能
+- 测试二级 range-key 分区表的数据分布和查询性能
+
+**工作原理**:
+1. **时间戳计算**：根据 `rangePartitionStartTs`、`rangePartitionDurationMs` 和 `rangePartitionCount` 计算每个 key 应该写入的时间戳，确保数据均匀分布到各个时间分区
+2. **Key 生成**：在时间范围测试模式下，key 会包含时间戳信息，格式为 `user_%012d_<timestamp>`，便于按时间范围进行查询
+3. **写入优化**：写入时会为每个 cell 指定计算出的时间戳，而不是使用当前系统时间，确保数据按预期分布
+4. **查询优化**：扫描操作会自动根据分区配置设置时间范围，只查询相关时间窗口内的数据，提高查询效率
+
+**注意事项**:
+- 启用 `obkv.enableTimeRangeTestMode=true` 时，必须同时配置所有分区相关参数（`rangePartitionStartTs`、`rangePartitionDurationMs`、`rangePartitionCount`、`keyCount`）
+- 分区配置应与建表时的分区策略保持一致，特别是 `rangePartitionStartTs` 和 `rangePartitionDurationMs` 必须与建表 SQL 中的 `start_timestamp` 和 `partition_duration_ms` 完全一致
+- 该模式主要用于测试场景，生产环境请根据实际需求选择是否启用
 
 #### 7. 其他配置
 
@@ -324,7 +353,68 @@ hbase.oceanbase.columnFamily=cf
 # ==========================================
 # 6. 分区配置（一级分区表）
 # ==========================================
-obkv.isMultiVersionMode=false   # 单版本模式，适合一级分区表
+obkv.enableTimeRangeTestMode=false   # 标准模式，适合一级分区表
+
+# ==========================================
+# 7. 其他配置
+# ==========================================
+obkv.debug=false                # 调试模式开关
+server.connection.pool.size=20  # 连接池大小
+rpc.operation.timeout=10000     # RPC 操作超时时间（毫秒）
+rpc.execute.timeout=15000       # RPC 执行超时时间（毫秒）
+```
+
+**二级分区表配置示例（ODP 模式，启用时间范围测试模式）**：
+
+```properties
+# ==========================================
+# 1. 基础配置
+# ==========================================
+recordcount=100000              # 数据加载阶段的记录数量
+operationcount=10000            # 运行阶段的操作数量
+fieldcount=10                   # 每条记录的字段数量
+fieldlength=100                 # 每个字段的长度（字节）
+threadcount=10                  # 并发线程数
+
+# ==========================================
+# 2. 操作比例配置（总和应为 1.0）
+# ==========================================
+readproportion=0.5             # 读取操作比例
+insertproportion=0.1            # 插入操作比例
+scanproportion=0.05             # 扫描操作比例（时间范围测试模式下会自动使用时间范围查询）
+batchputproportion=0            # 批量写入操作比例
+batchreadproportion=0           # 批量读取操作比例
+
+# ==========================================
+# 3. 批量操作配置
+# ==========================================
+batchput.size.per.op=10         # 每次批量写入的记录数
+batchread.size.per.op=10        # 每次批量读取的记录数
+
+# ==========================================
+# 4. 连接配置（ODP 模式）
+# ==========================================
+hbase.oceanbase.odpMode=true             # 连接模式：true=ODP模式, false=直连模式
+hbase.oceanbase.odpAddr=your_odp_address
+hbase.oceanbase.odpPort=your_odp_port
+hbase.oceanbase.fullUserName=your_full_user_name
+hbase.oceanbase.password=your_password
+hbase.oceanbase.database=your_database_name
+
+# ==========================================
+# 5. 表配置
+# ==========================================
+hbase.oceanbase.table=ycsb_test
+hbase.oceanbase.columnFamily=cf
+
+# ==========================================
+# 6. 分区配置（二级分区表，启用时间范围测试模式）
+# ==========================================
+obkv.enableTimeRangeTestMode=true        # 启用时间范围测试模式，适合二级分区表
+obkv.rangePartitionStartTs=1704067200000 # 第一个 Range 分区的起始时间戳（毫秒），需与建表时的 start_timestamp 一致
+obkv.rangePartitionDurationMs=2592000000 # 每个 Range 分区的时间跨度（毫秒），需与建表时的 partition_duration_ms 一致
+obkv.rangePartitionCount=30              # Range 分区的数量，需与建表时的分区数量一致
+obkv.keyCount=100000                     # Key 的总数量，用于确保 Key 在指定范围内循环使用
 
 # ==========================================
 # 7. 其他配置
