@@ -521,6 +521,11 @@ public class CoreWorkload extends Workload {
       orderedinserts = true;
     }
 
+    // If dotransactions is false, force orderedinserts to true
+    if (!p.getProperty(Client.DO_TRANSACTIONS_PROPERTY, String.valueOf(true)).equals("true")) {
+      orderedinserts = true;
+    }
+
     keysequence = new CounterGenerator(insertstart);
     operationchooser = createOperationGenerator(p);
 
