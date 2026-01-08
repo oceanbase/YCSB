@@ -308,7 +308,7 @@ batchread.size.per.op=10        # 每次批量读取的记录数
 # ==========================================
 # 4. 连接配置（ODP 模式）
 # ==========================================
-obkv.isOdpMode=true             # 连接模式：true=ODP模式, false=直连模式
+hbase.oceanbase.odpMode=true             # 连接模式：true=ODP模式, false=直连模式
 hbase.oceanbase.odpAddr=your_odp_address
 hbase.oceanbase.odpPort=your_odp_port
 hbase.oceanbase.fullUserName=your_full_user_name
