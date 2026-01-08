@@ -51,7 +51,7 @@ requestdistribution=uniform
 threadcount=10
 
 #### 连接方式(二选一) ####
-obkv.isOdpMode=ture
+hbase.oceanbase.odpMode=true
 
 ##### ODP模式必填 #####
 hbase.oceanbase.odpAddr=
@@ -64,7 +64,7 @@ hbase.oceanbase.sysPassword=
 ##### 账户密码 #####
 hbase.oceanbase.fullUserName=
 hbase.oceanbase.password=
-hbase.oceanbase.databasee=test
+hbase.oceanbase.database=test
 
 # ========== 表名 ==========
 hbase.oceanbase.table=ycsb_test

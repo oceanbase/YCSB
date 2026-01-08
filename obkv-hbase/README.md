@@ -195,7 +195,7 @@ Workload 配置文件位于 `workloads/` 目录下，包括：
 
 | 参数 | 类型 | 必填 | 说明 | 默认值 |
 |------|------|------|------|--------|
-| `obkv.isOdpMode` | boolean | 是 | 连接模式，true=ODP模式，false=直连模式 | - |
+| `hbase.oceanbase.odpMode` | boolean | 是 | 连接模式，true=ODP模式，false=直连模式 | - |
 | `hbase.oceanbase.odpAddr` | string | 是（ODP模式） | ODP 服务器地址 | - |
 | `hbase.oceanbase.odpPort` | int | 是（ODP模式） | ODP 服务器端口 | - |
 | `hbase.oceanbase.paramURL` | string | 是（直连模式） | 直连模式的参数 URL | - |
