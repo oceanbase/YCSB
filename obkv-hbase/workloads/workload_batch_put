@@ -74,8 +74,8 @@ hbase.oceanbase.columnFamily=cf
 obkv.rangePartitionStartTs=1767703570000
 obkv.rangePartitionDurationMs=2592000000
 obkv.rangePartitionCount=1
-# ========== 多版本配置 (obkv.isMultiVersionMode=true 时必填) ==========
-obkv.isMultiVersionMode=true
+# ========== 时间范围测试模式配置 (obkv.enableTimeRangeTestMode=true 时必填) ==========
+obkv.enableTimeRangeTestMode=true
 obkv.keyCount=10000
 
 # ========== 其他配置 ==========

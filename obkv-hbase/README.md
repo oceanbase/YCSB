@@ -211,22 +211,45 @@ hbase.oceanbase.table=ycsb_test
 hbase.oceanbase.columnFamily=cf
 ```
 
-#### 6. 分区配置
+#### 6. 分区配置与时间范围测试模式
+
+时间范围测试模式（`obkv.enableTimeRangeTestMode`）用于测试基于时间戳的分区表性能。启用该模式后，系统会：
+
+1. **基于分区配置生成时间戳**: 根据分区参数计算时间戳，确保数据均匀分布到不同的 Range 分区
+2. **写入时指定时间戳**: 在写入数据时，为每个 cell 指定计算出的时间戳（而非使用当前系统时间）
+3. **扫描时使用时间范围**: 在扫描操作时，自动设置时间范围查询，只查询特定时间窗口内的数据
+4. **Key 生成策略**: 生成 key 时会将时间戳附加到 key 上，确保数据按时间分布
+
+**配置项**:
 
 ```properties
+# 启用时间范围测试模式（可选，默认 false）
+obkv.enableTimeRangeTestMode=true
 
-# Range 分区配置
+# 启用此模式时，以下分区配置项为必填
 obkv.rangePartitionStartTs=1767703570000        # 起始时间戳（毫秒）
 obkv.rangePartitionDurationMs=2592000000       # 分区时间跨度（毫秒，默认1个月）
 obkv.rangePartitionCount=1                     # Range 分区数量
 obkv.keyCount=10000                            # Key 数量（用于循环使用）
 ```
 
-**分区配置说明**:
+**配置说明**:
+- `enableTimeRangeTestMode`: 是否启用时间范围测试模式，默认 `false`
 - `rangePartitionStartTs`: 第一个 Range 分区的起始时间戳（毫秒）
 - `rangePartitionDurationMs`: 每个 Range 分区的时间跨度（毫秒），默认 2592000000（30天）
 - `rangePartitionCount`: Range 分区的数量，应与建表时的分区数量一致
 - `keyCount`: Key 的总数量，用于确保 Key 在指定范围内循环使用
+
+**使用场景**:
+- 测试基于时间戳的 Range 分区表性能
+- 验证数据在不同时间分区中的分布情况
+- 测试时间范围查询的性能
+- 模拟时间序列数据的写入和查询场景
+
+**注意事项**:
+- 启用 `enableTimeRangeTestMode=true` 时，必须同时配置所有分区相关参数（`rangePartitionStartTs`、`rangePartitionDurationMs`、`rangePartitionCount`、`keyCount`）
+- 分区配置应与建表时的分区策略保持一致
+- 该模式主要用于测试场景，生产环境请根据实际需求选择是否启用
 
 #### 7. 其他配置
 
@@ -277,7 +300,7 @@ cat ycsb_test_cf_r1_k40_d2592000000.sql
 - 连接信息（ODP 地址或直连参数）
 - 账户密码
 - 表名和列族
-- 分区配置（如果使用多版本模式）
+- 分区配置（如果启用时间范围测试模式）
 - 记录数量和操作数量
 
 ### 步骤 4: 运行测试
