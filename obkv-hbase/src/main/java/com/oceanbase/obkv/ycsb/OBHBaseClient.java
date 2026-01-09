@@ -562,7 +562,11 @@ public class OBHBaseClient extends DB {
                 // add rowResult to result vector
                 result.add(rowResult);
                 numResults++;
-
+                if (debug) {
+                    for (Map.Entry<String, ByteIterator> entry : rowResult.entrySet()) {
+                        System.out.println("Result for field: " + entry.getKey() + " is: " + entry.getValue());
+                    }
+                }
                 // PageFilter does not guarantee that the number of results is <=
                 // pageSize, so this
                 // break is required.
