@@ -263,6 +263,11 @@ public class OBHBaseClient extends DB {
             config.set(HBASE_OCEANBASE_FULL_USER_NAME, props.getProperty(HBASE_OCEANBASE_FULL_USER_NAME));
             config.set(HBASE_OCEANBASE_PASSWORD, props.getProperty(HBASE_OCEANBASE_PASSWORD));
         }
+        if (props.getProperty(HBASE_HTABLE_USE_PUT_OPTIMIZATION) != null) {
+            config.setBoolean(HBASE_HTABLE_USE_PUT_OPTIMIZATION, Boolean.parseBoolean(props.getProperty(HBASE_HTABLE_USE_PUT_OPTIMIZATION)));
+        } else {
+            config.setBoolean(HBASE_HTABLE_USE_PUT_OPTIMIZATION, false);
+        }
         // Some other useful property
         for (Property property : Property.values()) {
             String value = props.getProperty(property.getKey());
@@ -713,9 +718,10 @@ public class OBHBaseClient extends DB {
                 }
                 while (res[i].advance()) {
                     final Cell c = res[i].current();
-                    Map<String, ByteIterator> result = valuesMap.get(Bytes.toString(CellUtil.cloneRow(c)));
+                    Map<String, ByteIterator> result = new HashMap<>();
                     result.put(Bytes.toString(CellUtil.cloneQualifier(c)),
                             new ByteArrayByteIterator(CellUtil.cloneValue(c)));
+                    valuesMap.put(Bytes.toString(CellUtil.cloneRow(c)), result);
                     if (debug) {
                         System.out.println(
                                 "Result for field: " + Bytes.toString(CellUtil.cloneQualifier(c))
@@ -724,9 +730,7 @@ public class OBHBaseClient extends DB {
                 }
             }
         } catch (Exception e) {
-            if (debug) {
-                System.err.println("Error doing batch read: " + e);
-            }
+            e.printStackTrace();
             return Status.ERROR;
         }
         return Status.OK;
