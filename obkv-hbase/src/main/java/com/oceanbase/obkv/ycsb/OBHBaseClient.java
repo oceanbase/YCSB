@@ -44,6 +44,7 @@ public class OBHBaseClient extends DB {
     public static final String ZOOKEEPER_QUORUM = "hbase.zookeeper.quorum";
     public static final String ZOOKEEPER_CLIENT_PORT = "hbase.zookeeper.property.clientPort";
     public static final String HBASE_CLIENT_IPC_POOL_SIZE = "hbase.client.ipc.pool.size";
+    public static final String HBASE_CLIENT_USE_PUT_OPTIMIZATION = "hbase.htable.use.put.optimization";
     private static final String KEY_FORMAT = "user_%012d_%s";
     private String             columnFamily;
     private byte[]             columnFamilyBytes;
@@ -263,10 +264,10 @@ public class OBHBaseClient extends DB {
             config.set(HBASE_OCEANBASE_FULL_USER_NAME, props.getProperty(HBASE_OCEANBASE_FULL_USER_NAME));
             config.set(HBASE_OCEANBASE_PASSWORD, props.getProperty(HBASE_OCEANBASE_PASSWORD));
         }
-        if (props.getProperty(HBASE_HTABLE_USE_PUT_OPTIMIZATION) != null) {
-            config.setBoolean(HBASE_HTABLE_USE_PUT_OPTIMIZATION, Boolean.parseBoolean(props.getProperty(HBASE_HTABLE_USE_PUT_OPTIMIZATION)));
+        if (props.getProperty(HBASE_CLIENT_USE_PUT_OPTIMIZATION) != null) {
+            config.setBoolean(HBASE_CLIENT_USE_PUT_OPTIMIZATION, Boolean.parseBoolean(props.getProperty(HBASE_CLIENT_USE_PUT_OPTIMIZATION)));
         } else {
-            config.setBoolean(HBASE_HTABLE_USE_PUT_OPTIMIZATION, false);
+            config.setBoolean(HBASE_CLIENT_USE_PUT_OPTIMIZATION, false);
         }
         // Some other useful property
         for (Property property : Property.values()) {
