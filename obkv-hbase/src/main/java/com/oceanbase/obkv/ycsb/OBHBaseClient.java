@@ -527,9 +527,9 @@ public class OBHBaseClient extends DB {
             Scan scan = new Scan();
             scan.setCaching(recordcount);
             if (enableTimeRangeTestMode) {
-                scan.setStartRow(Bytes.toBytes(generateK(startkey)));
+                scan.setStartRow(Bytes.toBytes(generateKeyPrefix(startkey) + "0"));
                 scan.setStopRow(Bytes.toBytes(generateKeyPrefix(startkey) + "9"));
-                scan.setTimeRange(genRangePartStartTs(startkey), genRangePartEndTs(startkey));
+                // scan.setTimeRange(genRangePartStartTs(startkey), genRangePartEndTs(startkey));
                 scan.setLimit(recordcount);
             } else {
                 scan.setMaxVersions(1);
