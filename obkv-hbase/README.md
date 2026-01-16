@@ -251,6 +251,50 @@ obkv.keyCount=10000                            # Key 数量（用于循环使用
 - 分区配置应与建表时的分区策略保持一致
 - 该模式主要用于测试场景，生产环境请根据实际需求选择是否启用
 
+#### 6.5 Scan 操作配置（PageFilter）
+
+Scan 操作支持使用 HBase 的 PageFilter 来控制每次扫描返回的记录数量。
+
+**配置项**:
+
+```properties
+# 启用 PageFilter（可选，默认 false）
+obkv.scan.usePageFilter=true
+
+# PageFilter 的大小（可选，如果不设置则使用 scan 的 recordcount 参数）
+obkv.scan.pageFilterSize=1000
+```
+
+**配置说明**:
+- `obkv.scan.usePageFilter`: 是否在 scan 操作中使用 PageFilter，默认 `false`
+  - 当设置为 `true` 时，scan 操作会使用 PageFilter 来限制每次扫描返回的记录数
+  - PageFilter 在服务端进行过滤，可以减少网络传输的数据量
+- `obkv.scan.pageFilterSize`: PageFilter 的页面大小（可选配置）
+  - 如果设置了此值，PageFilter 会使用该值作为 pageSize
+  - 如果未设置，PageFilter 会使用 scan 操作的 `recordcount` 参数作为 pageSize
+  - 必须为正整数，否则会在初始化时抛出异常
+
+**使用场景**:
+- 需要控制每次 scan 操作返回的记录数量
+- 减少网络传输数据量，提高 scan 性能
+- 测试不同 pageSize 对 scan 性能的影响
+
+**注意事项**:
+- PageFilter 不保证返回的记录数严格等于 pageSize，可能会略多于 pageSize
+- 代码中已经实现了额外的检查，当返回的记录数达到 `recordcount` 时会停止扫描
+- 建议在测试场景中根据实际需求调整 `pageFilterSize` 的值
+
+**示例配置**:
+
+```properties
+# 启用 PageFilter，使用默认的 recordcount 作为 pageSize
+obkv.scan.usePageFilter=true
+
+# 启用 PageFilter，并指定 pageSize 为 1000
+obkv.scan.usePageFilter=true
+obkv.scan.pageFilterSize=1000
+```
+
 #### 7. 其他配置
 
 ```properties

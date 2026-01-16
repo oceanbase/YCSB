@@ -668,18 +668,14 @@ public class CoreWorkload extends Workload {
       valuesMap.put(dbkey, values);
     }
 
-    // No more records for this client instance.
-    if (valuesMap.isEmpty()) {
-      return false;
-    }
-
     // Try batchPut with the same retry policy as single inserts.
     Status status;
     int numOfRetries = 0;
     do {
       try {
         status = db.batchPut(table, valuesMap);
-      } catch (RuntimeException e) {
+      } catch (Exception ex) {
+        ex.printStackTrace();
         // If the binding doesn't implement batchPut, fall back to single inserts.
         status = Status.ERROR;
         break;
@@ -701,7 +697,7 @@ public class CoreWorkload extends Workload {
           break;
         }
       } else {
-        System.err.println("Error inserting, not retrying any more. number of attempts: " + numOfRetries +
+        System.err.println("Error batch inserting, not retrying any more. number of attempts: " + numOfRetries +
             "Insertion Retry Limit: " + insertionRetryLimit);
         break;
       }
@@ -712,7 +708,12 @@ public class CoreWorkload extends Workload {
       Status s;
       numOfRetries = 0;
       do {
-        s = db.insert(table, e.getKey(), e.getValue());
+        try {
+          s = db.insert(table, e.getKey(), e.getValue());
+        } catch (Exception ex) {
+          ex.printStackTrace();
+          s = Status.ERROR;
+        }
         if (null != s && s.isOk()) {
           break;
         }
@@ -730,10 +731,6 @@ public class CoreWorkload extends Workload {
           break;
         }
       } while (true);
-
-      if (null == s || !s.isOk()) {
-        return false;
-      }
     }
     return true;
   }
