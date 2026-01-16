@@ -267,7 +267,26 @@ Workload 配置文件位于 `workloads/` 目录下，包括：
 - 分区配置应与建表时的分区策略保持一致，特别是 `rangePartitionStartTs` 和 `rangePartitionDurationMs` 必须与建表 SQL 中的 `start_timestamp` 和 `partition_duration_ms` 完全一致
 - 该模式主要用于测试场景，生产环境请根据实际需求选择是否启用
 
-#### 7. 其他配置
+#### 7. Scan 操作配置（PageFilter）
+
+Scan 操作支持使用 HBase 的 PageFilter 来控制每次扫描返回的记录数量。
+
+| 参数 | 类型 | 必填 | 说明 | 默认值 |
+|------|------|------|------|--------|
+| `obkv.scan.usePageFilter` | boolean | 否 | 是否在 scan 操作中使用 PageFilter。当设置为 `true` 时，scan 操作会使用 PageFilter 来限制每次扫描返回的记录数 | false |
+| `obkv.scan.pageFilterSize` | int | 否 | PageFilter 的页面大小。如果设置了此值，PageFilter 会使用该值作为 pageSize；如果未设置，PageFilter 会使用 scan 操作的 `recordcount` 参数作为 pageSize。必须为正整数，否则会在初始化时抛出异常 | 使用 `recordcount` 参数 |
+
+**使用场景**:
+- 需要控制每次 scan 操作返回的记录数量
+- 减少网络传输数据量，提高 scan 性能
+- 测试不同 pageSize 对 scan 性能的影响
+
+**注意事项**:
+- PageFilter 不保证返回的记录数严格等于 pageSize，可能会略多于 pageSize
+- 代码中已经实现了额外的检查，当返回的记录数达到 `recordcount` 时会停止扫描
+- 建议在测试场景中根据实际需求调整 `pageFilterSize` 的值
+
+#### 8. 其他配置
 
 | 参数 | 类型 | 必填 | 说明 | 默认值 |
 |------|------|------|------|--------|

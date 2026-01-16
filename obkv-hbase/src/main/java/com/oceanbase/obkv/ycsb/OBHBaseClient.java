@@ -24,6 +24,7 @@ import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.*;
+import org.apache.hadoop.hbase.filter.PageFilter;
 import org.apache.hadoop.hbase.util.Bytes;
 import java.io.IOException;
 import java.util.*;
@@ -37,6 +38,8 @@ public class OBHBaseClient extends DB {
     public static final String PROP_KEY_PARTITION_COUNT         = "obkv.rangePartitionCount";
     public static final String PROP_KEY_COUNT                   = "obkv.keyCount";
     public static final String PROP_ENABLE_TIME_RANGE_TEST_MODE = "obkv.enableTimeRangeTestMode";
+    public static final String PROP_USE_PAGE_FILTER             = "obkv.scan.usePageFilter";
+    public static final String PROP_PAGE_FILTER_SIZE            = "obkv.scan.pageFilterSize";
 
     public static final String COLUMN_FAMILY = "hbase.oceanbase.columnFamily";
     public static final String TABLE         = "hbase.oceanbase.table";
@@ -58,6 +61,8 @@ public class OBHBaseClient extends DB {
     private int partitionCount = 0;  // 一级range分区的数量
     private int keyCount = 1;  // id的总数量
     private boolean enableTimeRangeTestMode = false;  // 是否启用时间范围测试模式
+    private boolean usePageFilter = false;  // 是否使用PageFilter进行scan查询
+    private Integer pageFilterSize = null;  // PageFilter的大小，如果为null则使用recordcount
 
     @Override
     public void cleanup() throws DBException {
@@ -82,8 +87,30 @@ public class OBHBaseClient extends DB {
         columnFamilyBytes = Bytes.toBytes(columnFamily);
         System.out.println("columnFamily: " + columnFamily + ", table: " + tableName + ", debug: " + debug + ", isObkv: " + isObkv);
         enableTimeRangeTestMode = Boolean.parseBoolean(getProperties().getProperty(PROP_ENABLE_TIME_RANGE_TEST_MODE, "false"));
+        usePageFilter = Boolean.parseBoolean(getProperties().getProperty(PROP_USE_PAGE_FILTER, "false"));
+        String pageFilterSizeStr = getProperties().getProperty(PROP_PAGE_FILTER_SIZE);
+        if (pageFilterSizeStr != null && !pageFilterSizeStr.trim().isEmpty()) {
+            try {
+                pageFilterSize = Integer.parseInt(pageFilterSizeStr.trim());
+                if (pageFilterSize <= 0) {
+                    throw new DBException("Invalid pageFilterSize configuration: " + PROP_PAGE_FILTER_SIZE + 
+                                        " must be greater than 0, got: " + pageFilterSize);
+                }
+            } catch (NumberFormatException e) {
+                throw new DBException("Invalid pageFilterSize configuration: " + PROP_PAGE_FILTER_SIZE + 
+                                    " must be a valid integer, got: " + pageFilterSizeStr, e);
+            }
+        }
         if (enableTimeRangeTestMode) {
             initPartitionConfig();
+        }
+        if (debug && usePageFilter) {
+            System.out.println("PageFilter is enabled for scan operations");
+            if (pageFilterSize != null) {
+                System.out.println("PageFilter size is configured to: " + pageFilterSize);
+            } else {
+                System.out.println("PageFilter size will use recordcount parameter");
+            }
         }
         Configuration config = HBaseConfiguration.create();
         if (isObkv) {
@@ -531,11 +558,24 @@ public class OBHBaseClient extends DB {
                 scan.setStartRow(Bytes.toBytes(generateKeyPrefix(startkey) + "0"));
                 scan.setStopRow(Bytes.toBytes(generateKeyPrefix(startkey) + "9"));
                 // scan.setTimeRange(genRangePartStartTs(startkey), genRangePartEndTs(startkey));
-                scan.setLimit(recordcount);
             } else {
                 scan.setMaxVersions(1);
                 scan.setStartRow(Bytes.toBytes(generateK(startkey)));
                 scan.setStopRow(Bytes.toBytes(incrementPaddedKey(generateK(startkey), recordcount)));
+            }
+
+            // 如果启用PageFilter，设置PageFilter并指定pagesize
+            if (usePageFilter) {
+                // 如果配置了pageFilterSize，使用配置的值，否则使用recordcount
+                int pageSize = (pageFilterSize != null) ? pageFilterSize : recordcount;
+                PageFilter pageFilter = new PageFilter(pageSize);
+                scan.setFilter(pageFilter);
+                if (debug) {
+                    System.out.println("Using PageFilter with pageSize: " + pageSize + 
+                                     (pageFilterSize != null ? " (configured)" : " (from recordcount)"));
+                }
+            } else {
+                scan.setLimit(recordcount);
             }
         
             if (fields == null) {
