@@ -290,7 +290,7 @@ public class CoreWorkload extends Workload {
   /**
    * The default zero padding value. Matches integer sort order
    */
-  public static final String ZERO_PADDING_PROPERTY_DEFAULT = "1";
+  public static final String ZERO_PADDING_PROPERTY_DEFAULT = "12";
 
 
   /**

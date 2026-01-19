@@ -84,16 +84,16 @@ obkv-hbase/
 
 ```bash
 # HBase 一级分区（使用默认值）
-./create_table.sh --max_key 1000 --partition_count 4 --key_length 12
+./create_table.sh --max_key 1000 --partition_count 4
 
 # HBase 一级分区（显式指定）
-./create_table.sh --mode hbase --type first_part --max_key 1000 --partition_count 4 --key_length 12
+./create_table.sh --mode hbase --type first_part --max_key 1000 --partition_count 4
 
 # 时序模型一级分区
-./create_table.sh --mode timeseries --type first_part --max_key 1000 --partition_count 4 --key_length 12
+./create_table.sh --mode timeseries --type first_part --max_key 1000 --partition_count 4
 
 # 自定义表名和列族
-./create_table.sh --max_key 500 --partition_count 3 --key_length 10 --table_name mytable --family mycf
+./create_table.sh --max_key 500 --partition_count 3 --table_name mytable --family mycf
 ```
 
 #### 二级分区示例

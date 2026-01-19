@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default values
 DEFAULT_PARTITION_DURATION_MS=86400000  # 1 day in milliseconds
+DEFAULT_KEY_LENGTH=12                   # Default key length for formatting
 DEFAULT_TABLE_NAME_HBASE="ycsb_test"
 DEFAULT_FAMILY_HBASE="cf"
 DEFAULT_TABLE_NAME_TS="ycsb_test"
@@ -49,7 +50,7 @@ Options:
   For first-level partition (--type first_part):
     --max_key MAX_KEY            Maximum key value (required)
     --partition_count COUNT      Number of partitions (required)
-    --key_length LENGTH          Key length for formatting (required)
+    --key_length LENGTH          Key length for formatting (optional, default: 12)
   
   For second-level partition (--type sec_part):
     --start_timestamp TS         Start timestamp (ms) or date string (optional, default: current time)
@@ -63,23 +64,23 @@ Options:
     --help                      Show this help message
 
 Examples:
-  # HBase first-level partition (using defaults)
-  ./create_table.sh --max_key 1000 --partition_count 4 --key_length 12
+  # HBase first-level partition (using defaults, key_length defaults to 12)
+  ./create_table.sh --max_key 1000 --partition_count 4
   
-  # HBase first-level partition (explicit)
-  ./create_table.sh --mode hbase --type first_part --max_key 1000 --partition_count 4 --key_length 12
+  # HBase first-level partition (explicit, with custom key_length)
+  ./create_table.sh --mode hbase --type first_part --max_key 1000 --partition_count 4 --key_length 10
   
   # HBase second-level partition
   ./create_table.sh --mode hbase --type sec_part --key_subpartition_count 40 --start_timestamp 1704067200000
   
-  # Timeseries first-level partition
-  ./create_table.sh --mode timeseries --type first_part --max_key 1000 --partition_count 4 --key_length 12
+  # Timeseries first-level partition (key_length defaults to 12)
+  ./create_table.sh --mode timeseries --type first_part --max_key 1000 --partition_count 4
   
   # Timeseries second-level partition
   ./create_table.sh --mode timeseries --type sec_part --key_subpartition_count 40 --start_timestamp 1704067200000 --partition_duration_ms 2592000000
   
-  # With custom table name and output file
-  ./create_table.sh --max_key 1000 --partition_count 4 --key_length 12 --table_name mytable --family mycf --output_file mytable.sql
+  # With custom table name and output file (key_length defaults to 12)
+  ./create_table.sh --max_key 1000 --partition_count 4 --table_name mytable --family mycf --output_file mytable.sql
 EOF
 }
 
@@ -187,9 +188,9 @@ parse_args() {
       exit 1
     fi
 
+    # Set default key_length if not provided
     if [[ -z "$KEY_LENGTH" ]]; then
-      echo "Error: --key_length is required for first-level partition" >&2
-      exit 1
+      KEY_LENGTH="$DEFAULT_KEY_LENGTH"
     fi
     if ! [[ "$KEY_LENGTH" =~ ^[0-9]+$ ]] || [[ "$KEY_LENGTH" -le 0 ]]; then
       echo "Error: --key_length must be a positive integer" >&2
