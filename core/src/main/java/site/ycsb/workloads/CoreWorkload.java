@@ -61,6 +61,9 @@ import java.util.*;
  * digits in the record number.
  * <LI><b>insertorder</b>: should records be inserted in order by key ("ordered"), or in hashed
  * order ("hashed") (default: hashed)
+ * <LI><b>usestridedkeygenerator</b>: whether to use strided key generator for better key distribution
+ * to avoid hotspots during concurrent inserts. If true (default), keys are distributed across the
+ * key space using a stride mapping. If false, keys are generated sequentially using CounterGenerator.
  * <LI><b>fieldnameprefix</b>: what should be a prefix for field names, the shorter may decrease the
  * required storage size (default: "field")
  * </ul>
@@ -335,6 +338,18 @@ public class CoreWorkload extends Workload {
   public static final String INSERT_ORDER_PROPERTY_DEFAULT = "hashed";
 
   /**
+   * The name of the property for whether to use strided key generator for better key distribution.
+   * If true, uses StridedKeyGenerator to distribute keys across the key space to avoid hotspots.
+   * If false, uses CounterGenerator for sequential key generation.
+   */
+  public static final String USE_STRIDED_KEY_GENERATOR_PROPERTY = "usestridedkeygenerator";
+
+  /**
+   * Default value for whether to use strided key generator.
+   */
+  public static final String USE_STRIDED_KEY_GENERATOR_PROPERTY_DEFAULT = "true";
+
+  /**
    * Percentage data items that constitute the hot set.
    */
   public static final String HOTSPOT_DATA_FRACTION = "hotspotdatafraction";
@@ -526,7 +541,14 @@ public class CoreWorkload extends Workload {
       orderedinserts = true;
     }
 
-    keysequence = new CounterGenerator(insertstart);
+    boolean useStridedKeyGenerator = Boolean.parseBoolean(
+        p.getProperty(USE_STRIDED_KEY_GENERATOR_PROPERTY, USE_STRIDED_KEY_GENERATOR_PROPERTY_DEFAULT));
+
+    if (useStridedKeyGenerator) {
+      keysequence = new StridedKeyGenerator(insertstart, insertcount);
+    } else {
+      keysequence = new CounterGenerator(insertstart);
+    }
     operationchooser = createOperationGenerator(p);
 
     transactioninsertkeysequence = new AcknowledgedCounterGenerator(recordcount);
