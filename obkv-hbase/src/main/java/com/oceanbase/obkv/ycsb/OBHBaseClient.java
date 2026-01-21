@@ -303,8 +303,6 @@ public class OBHBaseClient extends DB {
                 config.set(property.getKey(), value);
             }
         }
-
-        zeropadding = Integer.parseInt(getProperties().getProperty("zeropadding", "12"));   
     }
 
     /**

@@ -358,7 +358,7 @@ public class CoreWorkload extends Workload {
    * How many times to retry when insertion of a single item to a DB fails.
    */
   public static final String INSERTION_RETRY_LIMIT = "core_workload_insertion_retry_limit";
-  public static final String INSERTION_RETRY_LIMIT_DEFAULT = "0";
+  public static final String INSERTION_RETRY_LIMIT_DEFAULT = "1";
 
   /**
    * On average, how long to wait between the retries, in seconds.
@@ -697,41 +697,12 @@ public class CoreWorkload extends Workload {
           break;
         }
       } else {
-        System.err.println("Error batch inserting, not retrying any more. number of attempts: " + numOfRetries +
-            "Insertion Retry Limit: " + insertionRetryLimit);
+        System.err.println("Error batch inserting, not retrying any more. Batch size: " + batchSize + ", Number of attempts: " + numOfRetries +
+            ", Insertion Retry Limit: " + insertionRetryLimit);
         break;
       }
     } while (true);
-
-    // Fallback path: insert records one-by-one (also with retry).
-    for (final Map.Entry<String, Map<String, ByteIterator>> e : valuesMap.entrySet()) {
-      Status s;
-      numOfRetries = 0;
-      do {
-        try {
-          s = db.insert(table, e.getKey(), e.getValue());
-        } catch (Exception ex) {
-          ex.printStackTrace();
-          s = Status.ERROR;
-        }
-        if (null != s && s.isOk()) {
-          break;
-        }
-        if (++numOfRetries <= insertionRetryLimit) {
-          System.err.println("Retrying insertion, retry count: " + numOfRetries);
-          try {
-            int sleepTime = (int) (1000 * insertionRetryInterval * (0.8 + 0.4 * Math.random()));
-            Thread.sleep(sleepTime);
-          } catch (InterruptedException ex) {
-            break;
-          }
-        } else {
-          System.err.println("Error inserting, not retrying any more. number of attempts: " + numOfRetries +
-              "Insertion Retry Limit: " + insertionRetryLimit);
-          break;
-        }
-      } while (true);
-    }
+    
     return true;
   }
 
