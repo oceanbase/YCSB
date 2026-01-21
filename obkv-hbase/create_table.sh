@@ -340,7 +340,7 @@ CREATE TABLE ${full_table_name} (
   \`K\` varbinary(1024) NOT NULL,
   \`Q\` varbinary(256) NOT NULL,
   \`T\` bigint(20) NOT NULL,
-  \`V\` varbinary(1024) DEFAULT NULL,
+  \`V\` varbinary(10240) DEFAULT NULL,
   PRIMARY KEY (\`K\`, \`Q\`, \`T\`)
 ) PARTITION BY RANGE COLUMNS(\`K\`) (
 EOF
@@ -395,7 +395,7 @@ CREATE TABLE ${full_table_name} (
   \`K\` varbinary(1024) NOT NULL,
   \`Q\` varbinary(256) NOT NULL,
   \`T\` bigint(20) NOT NULL,
-  \`V\` varbinary(1024) DEFAULT NULL,
+  \`V\` varbinary(10240) DEFAULT NULL,
   \`G\` bigint(20) GENERATED ALWAYS AS (ABS(\`T\`)),
   \`K_PREFIX\` varbinary(1024) generated always as (substring(\`K\`, 1, 16)),
   PRIMARY KEY (\`K\`, \`Q\`, \`T\`)
