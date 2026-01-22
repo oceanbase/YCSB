@@ -717,6 +717,7 @@ public class OBHBaseClient extends DB {
         try {
             connection.getTable(TableName.valueOf(tableName)).put(putList);
         } catch (IOException e) {
+            e.printStackTrace();
             if (debug) {
                 System.err.println("Error doing batch: " + e);
             }
