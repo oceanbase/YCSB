@@ -42,6 +42,12 @@ public class DBWrapper extends DB {
   private static final String REPORT_LATENCY_FOR_EACH_ERROR_PROPERTY_DEFAULT = "false";
 
   private static final String LATENCY_TRACKED_ERRORS_PROPERTY = "latencytrackederrors";
+  
+  private int retryLimit = 0;
+  private double retryInterval = 3.0;
+  
+  private static final String INSERTION_RETRY_LIMIT = "core_workload_insertion_retry_limit";
+  private static final String INSERTION_RETRY_INTERVAL = "core_workload_insertion_retry_interval";
 
   private static final AtomicBoolean LOG_REPORT_CONFIG = new AtomicBoolean(false);
 
@@ -103,11 +109,17 @@ public class DBWrapper extends DB {
               latencyTrackedErrorsProperty.split(",")));
         }
       }
+      
+      // Load retry configuration for Run phase
+      this.retryLimit = Integer.parseInt(getProperties().getProperty(INSERTION_RETRY_LIMIT, "0"));
+      this.retryInterval = Double.parseDouble(getProperties().getProperty(INSERTION_RETRY_INTERVAL, "3.0"));
 
       if (LOG_REPORT_CONFIG.compareAndSet(false, true)) {
         System.err.println("DBWrapper: report latency for each error is " +
             this.reportLatencyForEachError + " and specific error codes to track" +
             " for latency are: " + this.latencyTrackedErrors.toString());
+        System.err.println("DBWrapper: Run phase retry limit=" + this.retryLimit + 
+            ", retry interval=" + this.retryInterval + "s");
       }
     }
   }
@@ -140,12 +152,16 @@ public class DBWrapper extends DB {
                      Map<String, ByteIterator> result) {
     try (final TraceScope span = tracer.newScope(scopeStringRead)) {
       long ist = measurements.getIntendedStartTimeNs();
-      long st = System.nanoTime();
-      Status res = db.read(table, key, fields, result);
-      long en = System.nanoTime();
-      measure("READ", res, ist, st, en);
-      measurements.reportStatus("READ", res);
-      return res;
+      if (retryLimit > 0) {
+        return retryOperation("READ", () -> db.read(table, key, fields, result), ist);
+      } else {
+        long st = System.nanoTime();
+        Status res = db.read(table, key, fields, result);
+        long en = System.nanoTime();
+        measure("READ", res, ist, st, en);
+        measurements.reportStatus("READ", res);
+        return res;
+      }
     }
   }
 
@@ -164,12 +180,16 @@ public class DBWrapper extends DB {
                      Set<String> fields, Vector<HashMap<String, ByteIterator>> result) {
     try (final TraceScope span = tracer.newScope(scopeStringScan)) {
       long ist = measurements.getIntendedStartTimeNs();
-      long st = System.nanoTime();
-      Status res = db.scan(table, startkey, recordcount, fields, result);
-      long en = System.nanoTime();
-      measure("SCAN", res, ist, st, en);
-      measurements.reportStatus("SCAN", res);
-      return res;
+      if (retryLimit > 0) {
+        return retryOperation("SCAN", () -> db.scan(table, startkey, recordcount, fields, result), ist);
+      } else {
+        long st = System.nanoTime();
+        Status res = db.scan(table, startkey, recordcount, fields, result);
+        long en = System.nanoTime();
+        measure("SCAN", res, ist, st, en);
+        measurements.reportStatus("SCAN", res);
+        return res;
+      }
     }
   }
 
@@ -189,6 +209,53 @@ public class DBWrapper extends DB {
     measurements.measureIntended(measurementName,
         (int) ((endTimeNanos - intendedStartTimeNanos) / 1000));
   }
+  
+  /**
+   * Retry helper for Run phase operations. Sleeps are excluded from RT measurement.
+   */
+  private Status retryOperation(String operationName, java.util.function.Supplier<Status> operation,
+                                long intendedStartTime) {
+    int numOfRetries = 0;
+    long actualStartTime = System.nanoTime();
+    long currentIntendedStartTime = intendedStartTime; // Track current intended start time
+    
+    while (true) {
+      Status status = operation.get();
+      long actualEndTime = System.nanoTime();
+      
+      if (status != null && status.isOk()) {
+        // Only measure successful operation
+        measure(operationName, status, currentIntendedStartTime, actualStartTime, actualEndTime);
+        measurements.reportStatus(operationName, status);
+        return status;
+      }
+      
+      // Failed, check if we should retry
+      if (++numOfRetries <= retryLimit) {
+        System.out.println("Retrying " + operationName + " (" + numOfRetries + " of " + retryLimit + ")");
+        try {
+          int sleepTime = (int) (1000 * retryInterval * (0.8 + 0.4 * Math.random()));
+          Thread.sleep(sleepTime);
+          // Record retry sleep time to exclude from runtime
+          measurements.addRetrySleepTime(sleepTime);
+          // Reset start time after sleep so retry time is excluded from BOTH measurements
+          actualStartTime = System.nanoTime();
+          currentIntendedStartTime = actualStartTime; // Also reset intended time
+          measurements.setIntendedStartTimeNs(actualStartTime);
+        } catch (InterruptedException e) {
+          // Report the failed status and return
+          measure(operationName, status, currentIntendedStartTime, actualStartTime, actualEndTime);
+          measurements.reportStatus(operationName, status);
+          return status;
+        }
+      } else {
+        // No more retries, report the last failed status
+        measure(operationName, status, currentIntendedStartTime, actualStartTime, actualEndTime);
+        measurements.reportStatus(operationName, status);
+        return status;
+      }
+    }
+  }
 
   /**
    * Update a record in the database. Any field/value pairs in the specified values HashMap will be written into the
@@ -203,12 +270,16 @@ public class DBWrapper extends DB {
                        Map<String, ByteIterator> values) {
     try (final TraceScope span = tracer.newScope(scopeStringUpdate)) {
       long ist = measurements.getIntendedStartTimeNs();
-      long st = System.nanoTime();
-      Status res = db.update(table, key, values);
-      long en = System.nanoTime();
-      measure("UPDATE", res, ist, st, en);
-      measurements.reportStatus("UPDATE", res);
-      return res;
+      if (retryLimit > 0) {
+        return retryOperation("UPDATE", () -> db.update(table, key, values), ist);
+      } else {
+        long st = System.nanoTime();
+        Status res = db.update(table, key, values);
+        long en = System.nanoTime();
+        measure("UPDATE", res, ist, st, en);
+        measurements.reportStatus("UPDATE", res);
+        return res;
+      }
     }
   }
 
@@ -226,12 +297,16 @@ public class DBWrapper extends DB {
                        Map<String, ByteIterator> values) {
     try (final TraceScope span = tracer.newScope(scopeStringInsert)) {
       long ist = measurements.getIntendedStartTimeNs();
-      long st = System.nanoTime();
-      Status res = db.insert(table, key, values);
-      long en = System.nanoTime();
-      measure("INSERT", res, ist, st, en);
-      measurements.reportStatus("INSERT", res);
-      return res;
+      if (retryLimit > 0) {
+        return retryOperation("INSERT", () -> db.insert(table, key, values), ist);
+      } else {
+        long st = System.nanoTime();
+        Status res = db.insert(table, key, values);
+        long en = System.nanoTime();
+        measure("INSERT", res, ist, st, en);
+        measurements.reportStatus("INSERT", res);
+        return res;
+      }
     }
   }
 
@@ -264,12 +339,16 @@ public class DBWrapper extends DB {
     public Status batchPut(String table, Map<String, Map<String, ByteIterator>> valuesMap) {
       try (final TraceScope span = tracer.newScope(scopeStringBatchPut)) {
         long ist = measurements.getIntendedStartTimeNs();
-        long st = System.nanoTime();
-        Status res = db.batchPut(table, valuesMap);
-        long en = System.nanoTime();
-        measure("BATCH_PUT", res, ist, st, en);
-        measurements.reportStatus("BATCH_PUT", res);
-        return res;
+        if (retryLimit > 0) {
+          return retryOperation("BATCH_PUT", () -> db.batchPut(table, valuesMap), ist);
+        } else {
+          long st = System.nanoTime();
+          Status res = db.batchPut(table, valuesMap);
+          long en = System.nanoTime();
+          measure("BATCH_PUT", res, ist, st, en);
+          measurements.reportStatus("BATCH_PUT", res);
+          return res;
+        }
       }
     }
   
@@ -284,12 +363,16 @@ public class DBWrapper extends DB {
     public Status batchRead(String table, Set<String> fields, Map<String, Map<String, ByteIterator>> valuesMap) {
       try (final TraceScope span = tracer.newScope(scopeStringBatchRead)) {
         long ist = measurements.getIntendedStartTimeNs();
-        long st = System.nanoTime();
-        Status res = db.batchRead(table, fields, valuesMap);
-        long en = System.nanoTime();
-        measure("BATCH_READ", res, ist, st, en);
-        measurements.reportStatus("BATCH_READ", res);
-        return res;
+        if (retryLimit > 0) {
+          return retryOperation("BATCH_READ", () -> db.batchRead(table, fields, valuesMap), ist);
+        } else {
+          long st = System.nanoTime();
+          Status res = db.batchRead(table, fields, valuesMap);
+          long en = System.nanoTime();
+          measure("BATCH_READ", res, ist, st, en);
+          measurements.reportStatus("BATCH_READ", res);
+          return res;
+        }
       }
     }
 }

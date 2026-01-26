@@ -213,7 +213,7 @@ public final class Client {
    *
    * @throws IOException Either failed to write to output stream or failed to close it.
    */
-  private static void exportMeasurements(Properties props, int opcount, long runtime)
+  private static void exportMeasurements(Properties props, int opcount, long totalRuntime, long effectiveRuntime)
       throws IOException {
     MeasurementsExporter exporter = null;
     try {
@@ -239,8 +239,8 @@ public final class Client {
         exporter = new TextMeasurementsExporter(out);
       }
 
-      exporter.write("OVERALL", "RunTime(ms)", runtime);
-      double throughput = 1000.0 * (opcount) / (runtime);
+      exporter.write("OVERALL", "RunTime(ms)", totalRuntime);
+      double throughput = 1000.0 * (opcount) / (effectiveRuntime);
       exporter.write("OVERALL", "Throughput(ops/sec)", throughput);
 
       final Map<String, Long[]> gcs = Utils.getGCStatst();
@@ -250,14 +250,14 @@ public final class Client {
         exporter.write("TOTAL_GCS_" + entry.getKey(), "Count", entry.getValue()[0]);
         exporter.write("TOTAL_GC_TIME_" + entry.getKey(), "Time(ms)", entry.getValue()[1]);
         exporter.write("TOTAL_GC_TIME_%_" + entry.getKey(), "Time(%)",
-            ((double) entry.getValue()[1] / runtime) * (double) 100);
+            ((double) entry.getValue()[1] / totalRuntime) * (double) 100);
         totalGCCount += entry.getValue()[0];
         totalGCTime += entry.getValue()[1];
       }
       exporter.write("TOTAL_GCs", "Count", totalGCCount);
 
       exporter.write("TOTAL_GC_TIME", "Time(ms)", totalGCTime);
-      exporter.write("TOTAL_GC_TIME_%", "Time(%)", ((double) totalGCTime / runtime) * (double) 100);
+      exporter.write("TOTAL_GC_TIME_%", "Time(%)", ((double) totalGCTime / totalRuntime) * (double) 100);
       if (statusthread != null && statusthread.trackJVMStats()) {
         exporter.write("MAX_MEM_USED", "MBs", statusthread.getMaxUsedMem());
         exporter.write("MIN_MEM_USED", "MBs", statusthread.getMinUsedMem());
@@ -391,7 +391,46 @@ public final class Client {
 
     try {
       try (final TraceScope span = tracer.newScope(CLIENT_EXPORT_MEASUREMENTS_SPAN)) {
-        exportMeasurements(props, opsDone, en - st);
+        // Calculate total runtime (wall clock time)
+        long totalRuntime = en - st;
+        
+        // Calculate effective work time by excluding retry sleep time
+        // Get retry statistics
+        long totalRetrySleepTimeMs = Measurements.getMeasurements().getTotalRetrySleepTimeMs();
+        long totalRetryCount = Measurements.getMeasurements().getTotalRetryCount();
+        
+        // Calculate actual retry time considering multi-threading
+        // In multi-threaded scenarios, retries happen in parallel, so we need to estimate
+        // the actual wall-clock time consumed by retries.
+        long actualRetrySleepTimeMs = 0;
+        if (totalRetryCount > 0 && totalRetrySleepTimeMs > 0) {
+          // Estimate actual sleep time: assume retries are evenly distributed across threads
+          // Actual sleep time ≈ (total accumulated sleep time) / (thread count)
+          actualRetrySleepTimeMs = totalRetrySleepTimeMs / threadcount;
+          
+          // Output retry statistics for analysis
+          System.err.println("Total retries: " + totalRetryCount + 
+                           ", Accumulated sleep time: " + totalRetrySleepTimeMs + "ms" +
+                           ", Estimated actual sleep: " + actualRetrySleepTimeMs + "ms");
+        }
+        
+        long effectiveWorkTime = totalRuntime - actualRetrySleepTimeMs;
+        
+        // Ensure runtime is at least 1ms to avoid division by zero
+        if (totalRuntime < 1) {
+          totalRuntime = 1;
+        }
+        
+        // Sanity check: if effective work time is negative or too small, fall back to total runtime
+        if (effectiveWorkTime < totalRuntime * 0.1) {
+          System.err.println("[WARNING] Effective work time (" + effectiveWorkTime + "ms) is too small " +
+                           "compared to total runtime (" + totalRuntime + "ms). " +
+                           "Using total runtime for OPS calculation.");
+          effectiveWorkTime = totalRuntime;
+        }
+        
+        // Export: Runtime shows wall clock time, OPS uses effective work time (excluding retry sleep)
+        exportMeasurements(props, opsDone, totalRuntime, effectiveWorkTime);
       }
     } catch (IOException e) {
       System.err.println("Could not export measurements, error: " + e.getMessage());

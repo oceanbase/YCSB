@@ -1,0 +1,87 @@
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  animation: fadeIn 0.3s ease;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.card-header-clickable {
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.card-header-clickable:hover {
+  background: var(--color-bg-hover);
+}
+
+.card-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--gradient-primary);
+  border-radius: var(--radius-md);
+  font-size: 18px;
+}
+
+.card-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.card-subtitle {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.card-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.card-collapse-icon {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast);
+  margin-left: var(--spacing-sm);
+}
+
+.card-collapse-icon.collapsed {
+  transform: rotate(-90deg);
+}
+
+.card-body {
+  padding: var(--spacing-lg);
+}
+
+.card-collapsed .card-header {
+  border-bottom: none;
+}
+

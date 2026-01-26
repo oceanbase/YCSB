@@ -71,6 +71,14 @@ public class Measurements {
   private final MeasurementType measurementType;
   private final int measurementInterval;
   private final Properties props;
+  
+  // Track total retry sleep time (in milliseconds) to exclude from runtime for OPS calculation
+  private final java.util.concurrent.atomic.AtomicLong totalRetrySleepTimeMs = 
+      new java.util.concurrent.atomic.AtomicLong(0);
+  
+  // Track total retry count to calculate actual retry time more accurately
+  private final java.util.concurrent.atomic.AtomicLong totalRetryCount = 
+      new java.util.concurrent.atomic.AtomicLong(0);
 
   /**
    * Create a new object with the specified properties.
@@ -276,6 +284,31 @@ public class Measurements {
       ret += m.getSummary() + " ";
     }
     return ret;
+  }
+  
+  /**
+   * Add retry sleep time to be excluded from runtime calculation.
+   * @param sleepTimeMs Sleep time in milliseconds
+   */
+  public void addRetrySleepTime(long sleepTimeMs) {
+    totalRetrySleepTimeMs.addAndGet(sleepTimeMs);
+    totalRetryCount.incrementAndGet();
+  }
+  
+  /**
+   * Get total retry sleep time accumulated across all threads.
+   * @return Total sleep time in milliseconds
+   */
+  public long getTotalRetrySleepTimeMs() {
+    return totalRetrySleepTimeMs.get();
+  }
+  
+  /**
+   * Get total retry count across all threads.
+   * @return Total retry count
+   */
+  public long getTotalRetryCount() {
+    return totalRetryCount.get();
   }
 
 }

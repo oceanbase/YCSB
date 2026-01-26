@@ -16,6 +16,9 @@ output*
 *.ipr
 *.iws
 
+# ignore VS Code files
+.vscode/
+
 # ignore standard Vim and Emacs temp files
 *.swp
 *~
@@ -23,3 +26,15 @@ output*
 # ignore standard Mac OS X files/dirs
 .DS_Store
 /differentbin/
+
+# ignore dist and build artifacts
+dist/
+*.tar.gz
+
+# ignore test results and logs
+result/
+*.log
+
+# ignore temporary files
+obkv-hbase/server/temp/
+*.properties.tmp

@@ -1,0 +1,24 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: obkv-benchmark-console
+
+# YCSB Configuration
+ycsb:
+  # Path to the YCSB jar file
+  jar-path: ${YCSB_JAR_PATH:obkv-hbase/target/obkv-hbase-0.18.0-SNAPSHOT-jar-with-dependencies.jar}
+  # Path to workloads directory
+  workloads-path: ${YCSB_WORKLOADS_PATH:workloads/workloads_a_f}
+  # Temp directory for generated workload files
+  temp-path: ${YCSB_TEMP_PATH:temp}
+
+# Logging
+logging:
+  level:
+    com.oceanbase.obkv: DEBUG
+    root: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+

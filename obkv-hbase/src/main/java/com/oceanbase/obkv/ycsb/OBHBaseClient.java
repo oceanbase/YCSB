@@ -16,13 +16,13 @@
  */
 
 package com.oceanbase.obkv.ycsb;
+import com.alipay.oceanbase.hbase.OHTableClient;
 import com.alipay.oceanbase.rpc.property.Property;
 import site.ycsb.*;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseConfiguration;
-import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.*;
 import org.apache.hadoop.hbase.util.Bytes;
 import java.io.IOException;
@@ -32,38 +32,23 @@ import static site.ycsb.Status.*;
 import static org.apache.commons.lang.StringUtils.isNotBlank;
 
 public class OBHBaseClient extends DB {
-    public static final String PROP_KEY_PARTITION_START_TS      = "obkv.rangePartitionStartTs";
-    public static final String PROP_KEY_PARTITION_DURATION_MS   = "obkv.rangePartitionDurationMs";
-    public static final String PROP_KEY_PARTITION_COUNT         = "obkv.rangePartitionCount";
-    public static final String PROP_KEY_COUNT                   = "obkv.keyCount";
-    public static final String PROP_ENABLE_TIME_RANGE_TEST_MODE = "obkv.enableTimeRangeTestMode";
-
     public static final String COLUMN_FAMILY = "hbase.oceanbase.columnFamily";
     public static final String TABLE         = "hbase.oceanbase.table";
-    public static final String HBASE_MASTER  = "hbase.master";
-    public static final String ZOOKEEPER_QUORUM = "hbase.zookeeper.quorum";
-    public static final String ZOOKEEPER_CLIENT_PORT = "hbase.zookeeper.property.clientPort";
-    public static final String HBASE_CLIENT_IPC_POOL_SIZE = "hbase.client.ipc.pool.size";
-    public static final String USE_PUT_OPTIMIZATION = "hbase.htable.use.put.optimization";
-    private static final String KEY_FORMAT = "user_%012d_%s";
+    public static final String VERSION       = "hbase.oceanbase.version";
+
     private String             columnFamily;
     private byte[]             columnFamilyBytes;
     private String             tableName;
     public boolean             debug         = false;
-    private Connection connection = null;
+    private OHTableClient client = null;
     private int                zeropadding;
-    private boolean            isObkv = true;
-    private long partitionStartTs = 0;  // 第一个range分区的起始时间戳（毫秒）
-    private long partitionDurationMs = 0;  // 每个range分区的时间长度（毫秒）
-    private int partitionCount = 0;  // 一级range分区的数量
-    private int keyCount = 1;  // id的总数量
-    private boolean enableTimeRangeTestMode = false;  // 是否启用时间范围测试模式
+    private Long               version       = null;
 
     @Override
     public void cleanup() throws DBException {
-        if (connection != null) {
+        if (client != null) {
             try {
-                connection.close();
+                client.close();
             } catch (IOException e) {
                 throw new DBException(e);
             }
@@ -76,144 +61,27 @@ public class OBHBaseClient extends DB {
      */
     public void init() throws DBException {
         debug = Boolean.parseBoolean(getProperties().getProperty("obkv.debug", "false"));
-        isObkv = Boolean.parseBoolean(getProperties().getProperty("isObkv", "true"));
         columnFamily = getProperties().getProperty(COLUMN_FAMILY);
         tableName = getProperties().getProperty(TABLE);
         columnFamilyBytes = Bytes.toBytes(columnFamily);
-        System.out.println("columnFamily: " + columnFamily + ", table: " + tableName + ", debug: " + debug + ", isObkv: " + isObkv);
-        enableTimeRangeTestMode = Boolean.parseBoolean(getProperties().getProperty(PROP_ENABLE_TIME_RANGE_TEST_MODE, "false"));
-        if (enableTimeRangeTestMode) {
-            initPartitionConfig();
-        }
-        Configuration config = HBaseConfiguration.create();
-        if (isObkv) {
-            config.set(ClusterConnection.HBASE_CLIENT_CONNECTION_IMPL, "com.alipay.oceanbase.hbase.util.OHConnectionImpl");
-            initObkvConfig(config);
-        } else {
-            initHBaseConfigAndTestConnectivity(config);
-        }
-        try {
-            connection = ConnectionFactory.createConnection(config);
-            
-            if (!isObkv) {
-                final TableName tName = TableName.valueOf(tableName);
-                System.out.println("Checking if table exists: " + tName);
-                
-                try (Admin admin = connection.getAdmin()) {
-                    System.out.println("Admin created, checking table existence...");
-                    boolean tableExists = admin.tableExists(tName);
-                    System.out.println("Table existence check completed: " + tableExists);
-                    
-                    if (!tableExists) {
-                        throw new DBException("Table " + tName + " does not exist");
-                    }
-                } catch (IOException e) {
-                    System.err.println("Error checking table existence: " + e.getMessage());
-                    if (e.getCause() != null) {
-                        System.err.println("Root cause: " + e.getCause().getMessage());
-                    }
-                    e.printStackTrace();
-                }
-                System.out.println("Table exists and is accessible");
-            }
-        } catch (IOException e) {
-            System.err.println("Error during HBase initialization: " + e.getMessage());
-            if (e.getCause() != null) {
-                System.err.println("Root cause: " + e.getCause().getMessage());
-            }
-            e.printStackTrace();
-            throw new DBException(e);
-        } catch (Exception e) {
-            System.err.println("Unexpected error during HBase initialization: " + e.getMessage());
-            if (e.getCause() != null) {
-                System.err.println("Root cause: " + e.getCause().getMessage());
-            }
-            e.printStackTrace();
-            throw new DBException(e);
-        }
-    }
-
-    private void initHBaseConfigAndTestConnectivity(final Configuration config) {
-        // 不设置hbase.master，让HBase通过ZooKeeper自动发现
-        // config.set("hbase.master", getProperties().getProperty("hbase.master", "127.0.0.1:16000"));
-        config.set(ZOOKEEPER_QUORUM, getProperties().getProperty(ZOOKEEPER_QUORUM, "127.0.0.1"));
-        config.set(ZOOKEEPER_CLIENT_PORT, getProperties().getProperty(ZOOKEEPER_CLIENT_PORT, "2181"));
-        config.set(HBASE_CLIENT_IPC_POOL_SIZE, getProperties().getProperty(HBASE_CLIENT_IPC_POOL_SIZE, "256"));
-
-        // 添加超时配置，防止卡死
-        config.set("hbase.client.operation.timeout", "10000"); // 10秒操作超时
-        config.set("hbase.client.scanner.timeout.period", "10000"); // 10秒扫描超时
-        config.set("hbase.rpc.timeout", "10000"); // 10秒RPC超时
-        config.set("hbase.client.retries.number", "1"); // 重试次数
-        config.set("hbase.client.pause", "100"); // 重试间隔100ms
-
-        // 添加更多HBase配置
-        config.set("hbase.zookeeper.property.clientPort", getProperties().getProperty(ZOOKEEPER_CLIENT_PORT, "2181"));
-        config.set("hbase.zookeeper.quorum", getProperties().getProperty(ZOOKEEPER_QUORUM, "127.0.0.1"));
-
-        System.out.println("HBase Configuration:");
-        System.out.println("  ZOOKEEPER_QUORUM: " + config.get(ZOOKEEPER_QUORUM));
-        System.out.println("  ZOOKEEPER_CLIENT_PORT: " + config.get(ZOOKEEPER_CLIENT_PORT));
-        System.out.println("  HBASE_MASTER: (auto-discovered via ZooKeeper)");
-        System.out.println("  HBASE_CLIENT_OPERATION_TIMEOUT: " + config.get("hbase.client.operation.timeout"));
-        System.out.println("  HBASE_RPC_TIMEOUT: " + config.get("hbase.rpc.timeout"));
-
-        // 测试网络连接
-        System.out.println("Testing network connectivity...");
-        testNetworkConnectivity(
-                getProperties().getProperty(ZOOKEEPER_QUORUM, "127.0.0.1"),
-                Integer.parseInt(getProperties().getProperty(ZOOKEEPER_CLIENT_PORT, "2181")));
-    }
-
-    private void initPartitionConfig() throws DBException {
-        Properties props = getProperties();
-        // partition configuration for uniform distribution - 必须显式指定且值必须大于0
-        if (props.getProperty(PROP_KEY_PARTITION_START_TS) != null) {
-            partitionStartTs = Long.parseLong(props.getProperty(PROP_KEY_PARTITION_START_TS));
-            if (partitionStartTs <= 0) {
-                throw new DBException("Invalid partition configuration: " + PROP_KEY_PARTITION_START_TS + 
-                                    " must be specified and greater than 0 (millisecond timestamp)");
-            }
-        } else {
-            throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_PARTITION_START_TS + 
-                                " (must be greater than 0, millisecond timestamp)");
-        }
-        if (props.getProperty(PROP_KEY_PARTITION_DURATION_MS) != null) {
-            partitionDurationMs = Long.parseLong(props.getProperty(PROP_KEY_PARTITION_DURATION_MS));
-            if (partitionDurationMs <= 0) {
-                throw new DBException("Invalid partition configuration: " + PROP_KEY_PARTITION_DURATION_MS + 
-                                    " must be specified and greater than 0 (milliseconds)");
-            }
-        } else {
-            throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_PARTITION_DURATION_MS + 
-                                " (must be greater than 0, milliseconds)");
-        }
-        if (props.getProperty(PROP_KEY_PARTITION_COUNT) != null) {
-            partitionCount = Integer.parseInt(props.getProperty(PROP_KEY_PARTITION_COUNT));
-            if (partitionCount <= 0) {
-                throw new DBException("Invalid partition configuration: " + PROP_KEY_PARTITION_COUNT + 
-                                    " must be specified and greater than 0 (integer)");
-            }
-        } else {
-            throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_PARTITION_COUNT + 
-                                " (must be greater than 0, integer)");
-        }
-        if (props.getProperty(PROP_KEY_COUNT) != null) {
-            keyCount = Integer.parseInt(props.getProperty(PROP_KEY_COUNT));
-            if (keyCount <= 0) {
-                throw new DBException("Invalid partition configuration: " + PROP_KEY_COUNT + 
-                                    " must be specified and greater than 0 (integer)");
-            }
-        } else {
-            throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_COUNT + 
-                                " (must be greater than 0, integer)");
-        }
         
-        if (debug) {
-            System.out.println("Partition config: startTs=" + partitionStartTs + 
-                             ", durationMs=" + partitionDurationMs + 
-                             ", count=" + partitionCount +
-                             ", keyCount=" + keyCount);
+        String v = getProperties().getProperty(VERSION);
+        if (isNotBlank(v)) {
+            try {
+                version = Long.parseLong(v);
+            } catch (NumberFormatException e) {
+                System.err.println("Invalid version format: " + v);
+            }
+        }
+
+        System.out.println("columnFamily: " + columnFamily + ", table: " + tableName + ", version: " + version + ", debug: " + debug);
+        Configuration config = HBaseConfiguration.create();
+        initObkvConfig(config);
+        client = new OHTableClient(tableName, config);
+        try {
+            client.init();
+        } catch (Exception e) {
+            throw new DBException(e);
         }
     }
 
@@ -264,11 +132,7 @@ public class OBHBaseClient extends DB {
             config.set(HBASE_OCEANBASE_FULL_USER_NAME, props.getProperty(HBASE_OCEANBASE_FULL_USER_NAME));
             config.set(HBASE_OCEANBASE_PASSWORD, props.getProperty(HBASE_OCEANBASE_PASSWORD));
         }
-        if (props.getProperty(USE_PUT_OPTIMIZATION) != null) {
-            config.setBoolean(USE_PUT_OPTIMIZATION, Boolean.parseBoolean(props.getProperty(USE_PUT_OPTIMIZATION)));
-        } else {
-            config.setBoolean(USE_PUT_OPTIMIZATION, false);
-        }
+
         // Some other useful property
         for (Property property : Property.values()) {
             String value = props.getProperty(property.getKey());
@@ -277,22 +141,19 @@ public class OBHBaseClient extends DB {
             }
         }
 
-        zeropadding = Integer.parseInt(getProperties().getProperty("zeropadding", "12"));   
-    }
+        // Set hardcoded connection stability parameters
+        config.set("rpc.connect.timeout", "10000");
+        config.set("metadata.refresh.lock.timeout", "20000");
+        config.set("rs.list.acquire.connect.timeout", "10000");
+        config.set("rs.list.acquire.read.timeout", "10000");
+        config.set("table.entry.acquire.connect.timeout", "10000");
+        config.set("table.entry.acquire.socket.timeout", "10000");
+        config.set("table.entry.refresh.lock.timeout", "10000");
+        config.set("rpc.login.timeout", "10000");
+        config.set("connection.max.expired.time", "10000");
+        config.set("runtime.max.wait", "10000");
 
-    /**
-     * 测试网络连接
-     */
-    private void testNetworkConnectivity(String host, int port) {
-        try {
-            System.out.println("Testing network connectivity to " + host + ":" + port);
-            java.net.Socket socket = new java.net.Socket();
-            socket.connect(new java.net.InetSocketAddress(host, port), 5000);
-            System.out.println("Network connection successful to " + host + ":" + port);
-            socket.close();
-        } catch (Exception e) {
-            System.err.println("Network connection failed to " + host + ":" + port + ": " + e.getMessage());
-        }
+        zeropadding = Integer.parseInt(getProperties().getProperty("zeropadding", "12"));   
     }
 
     /**
@@ -317,153 +178,9 @@ public class OBHBaseClient extends DB {
     private String incrementPaddedKey(String paddedKey, long increment) {
         return incrementPaddedKey(paddedKey, increment, zeropadding);
     }
-
-
-     /**
-     * 基于ycsb_key生成唯一Key，确保Key数量为KeyCount，循环使用
-     * @param key YCSB 生成ycsb_key，是一个整型字符串（递增id）
-     * @return K 字符串，长度为 36
-     */
-     private String generateK(String key) {
-        if (!enableTimeRangeTestMode) {
-            return key;
-        }
-
-        long keyValue;
-        try {
-            keyValue = Long.parseLong(key.trim());
-        } catch (NumberFormatException e) {
-            // 如果不是数字，使用hashCode
-            keyValue = Math.abs((long)key.hashCode());
-        }
-        
-        // id = key % keyCount，确保key循环使用
-        long KeyValue = keyValue % keyCount;
-        
-        return generateKeyPrefix(key) + generateTs(key);
-    }
-
-    private String generateKeyPrefix(String key) {
-        long keyValue;
-        try {
-            keyValue = Long.parseLong(key.trim());
-        } catch (NumberFormatException e) {
-            // 如果不是数字，使用hashCode
-            keyValue = Math.abs((long)key.hashCode());
-        }
-        
-        // id = key % keyCount，确保key循环使用
-        long KeyValue = keyValue % keyCount;
-        return String.format(KEY_FORMAT, KeyValue, "");
-    }
-
-    /**
-     * 基于key生成ts (timestamp)，确保均匀分布在所有range分区上
-     * @param key YCSB 生成的 key，是一个整型字符串（递增id）
-     * @return Timestamp 对象
-     */
-    private Long generateTs(String key) {
-        // 如果未配置分区参数，使用当前系统时间
-        if (!enableTimeRangeTestMode || partitionCount <= 0 || partitionDurationMs <= 0) {
-            return System.currentTimeMillis();
-        }
-        
-        // 将key转换为数值
-        long keyValue;
-        try {
-            keyValue = Long.parseLong(key.trim());
-        } catch (NumberFormatException e) {
-            // 如果不是数字，使用hashCode
-            keyValue = Math.abs((long)key.hashCode());
-        }
-        
-        // 使用key本身作为hash值，确保不同key均匀分布
-        // 为了更好的分布，可以使用一个简单的hash函数
-        long hash = keyValue;
-        
-        // 计算分区索引：hash % partitionCount
-        int partitionIndex = (int) (hash % partitionCount);
-        
-        // 计算在该分区内的偏移：hash % partitionDurationMs
-        long offsetInPartition = hash % partitionDurationMs;
-        
-        // 计算最终的ts = 起始时间 + 分区索引 * 分区长度 + 分区内偏移
-        long finalTs = partitionStartTs + partitionIndex * partitionDurationMs + offsetInPartition;
-        
-        if (debug) {
-            System.out.println("generateTs: key=" + key + 
-                             ", hash=" + hash + 
-                             ", partitionIndex=" + partitionIndex + 
-                             ", offsetInPartition=" + offsetInPartition + 
-                             ", finalTs=" + finalTs);
-        }
-        
-        return finalTs;
-    }
-
-    private long genRangePartStartTs(String key) {
-        // 将key转换为数值
-        long keyValue;
-        try {
-            keyValue = Long.parseLong(key.trim());
-        } catch (NumberFormatException e) {
-            // 如果不是数字，使用hashCode
-            keyValue = Math.abs((long)key.hashCode());
-        }
-        
-        // 使用key本身作为hash值，确保不同key均匀分布
-        // 为了更好的分布，可以使用一个简单的hash函数
-        long hash = keyValue;
-        
-        // 计算分区索引：hash % partitionCount
-        int partitionIndex = (int) (hash % partitionCount);
-        
-        // 计算在该分区内的偏移：hash % partitionDurationMs
-        long offsetInPartition = hash % partitionDurationMs;
-        
-        // 计算最终的ts = 起始时间 + 分区索引 * 分区长度
-        long finalTs = partitionStartTs + partitionIndex * partitionDurationMs;
-        
-        if (debug) {
-            System.out.println("generateTs: key=" + key + 
-                             ", hash=" + hash + 
-                             ", partitionIndex=" + partitionIndex + 
-                             ", finalTs=" + finalTs);
-        }
-        return finalTs;
-    }
     
-    private long genRangePartEndTs(String key) {
-        // 将key转换为数值
-        long keyValue;
-        try {
-            keyValue = Long.parseLong(key.trim());
-        } catch (NumberFormatException e) {
-            // 如果不是数字，使用hashCode
-            keyValue = Math.abs((long)key.hashCode());
-        }
-        
-        // 使用key本身作为hash值，确保不同key均匀分布
-        // 为了更好的分布，可以使用一个简单的hash函数
-        long hash = keyValue;
-        
-        // 计算分区索引：hash % partitionCount
-        int partitionIndex = (int) (hash % partitionCount);
-        
-        // 计算在该分区内的偏移：hash % partitionDurationMs
-        long offsetInPartition = hash % partitionDurationMs;
-        
-        // 计算最终的ts = 起始时间 + 分区索引 * 分区长度 + 分区内偏移
-        long finalTs = partitionStartTs + (partitionIndex + 1)* partitionDurationMs - 1;
-        
-        if (debug) {
-            System.out.println("generateTs: key=" + key + 
-                             ", hash=" + hash + 
-                             ", partitionIndex=" + partitionIndex + 
-                             ", finalTs=" + finalTs);
-        }
-        return finalTs;
-    }
+
+
 
     /**
      * 读取数据测试，目前无法测试批量读取
@@ -482,10 +199,7 @@ public class OBHBaseClient extends DB {
                 System.out.println("Doing read from HBase columnfamily " + columnFamily);
                 System.out.println("Doing read for key: " + key);
             }
-            Get g = new Get(Bytes.toBytes(generateK(key)));
-            // if (enableTimeRangeTestMode) {
-            //     g.setTimeRange(genRangePartStartTs(key), genRangePartEndTs(key));
-            // }
+            Get g = new Get(Bytes.toBytes(key));
             if (fields == null) {
                 g.addFamily(columnFamilyBytes);
             } else {
@@ -493,13 +207,18 @@ public class OBHBaseClient extends DB {
                     g.addColumn(columnFamilyBytes, Bytes.toBytes(field));
                 }
             }
-            r = connection.getTable(TableName.valueOf(tableName)).get(g);
+            r = client.get(g);
         } catch (IOException e) {
             System.err.println("Error doing get: " + e);
             return SERVICE_UNAVAILABLE;
         } catch (ConcurrentModificationException e) {
             return SERVICE_UNAVAILABLE;
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("get failed");
+            return ERROR;
         }
+
         while (r.advance()) {
             final Cell cell = r.current();
             result.put(Bytes.toString(CellUtil.cloneQualifier(cell)), 
@@ -527,16 +246,9 @@ public class OBHBaseClient extends DB {
         try {
             Scan scan = new Scan();
             scan.setCaching(recordcount);
-            if (enableTimeRangeTestMode) {
-                scan.setStartRow(Bytes.toBytes(generateK(startkey)));
-                scan.setStopRow(Bytes.toBytes(generateKeyPrefix(startkey) + "9"));
-                scan.setTimeRange(genRangePartStartTs(startkey), genRangePartEndTs(startkey));
-                scan.setLimit(recordcount);
-            } else {
-                scan.setMaxVersions(1);
-                scan.setStartRow(Bytes.toBytes(generateK(startkey)));
-                scan.setStopRow(Bytes.toBytes(incrementPaddedKey(generateK(startkey), recordcount)));
-            }
+            scan.setMaxVersions(1);
+            scan.setStartRow(Bytes.toBytes(startkey));
+            scan.setStopRow(Bytes.toBytes(incrementPaddedKey(startkey, recordcount)));
         
             if (fields == null) {
                 scan.addFamily(columnFamilyBytes);
@@ -546,8 +258,7 @@ public class OBHBaseClient extends DB {
                 }
             }
 
-
-            scanner = connection.getTable(TableName.valueOf(tableName)).getScanner(scan);
+            scanner = client.getScanner(scan);
             int numResults = 0;
             for (Result rr = scanner.next(); rr != null; rr = scanner.next()) {
                 // get row key
@@ -586,6 +297,10 @@ public class OBHBaseClient extends DB {
                 System.out.println("Error in getting/parsing scan result: " + e);
             }
             return Status.ERROR;
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("scan failed");
+            return ERROR;
         } finally {
             if (scanner != null) {
                 scanner.close();
@@ -606,20 +321,20 @@ public class OBHBaseClient extends DB {
         if (debug) {
             System.out.println("Setting up put for key: " + key);// NOPMD
         }
-        Put p = new Put(Bytes.toBytes(generateK(key)));
+        Put p = new Put(Bytes.toBytes(key));
         for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
-            if (debug) {
-                System.out.println("Adding field/value " + entry.getKey() + "/" + entry.getValue()// NOPMD
-                                   + " to put request");// NOPMD
-            }
-            if (enableTimeRangeTestMode) {
-                p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), generateTs(key), entry.getValue().toArray());
+            if (version != null) {
+                p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), version, entry.getValue().toArray());
             } else {
                 p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), entry.getValue().toArray());
             }
+            if (debug) {
+                System.out.println("Adding field/value " + entry.getKey() + "/" + entry.getValue()
+                                   + " to put request");
+            }
         }
         try {
-            connection.getTable(TableName.valueOf(tableName)).put(p);
+            client.put(p);
             if (debug) {
                 System.out.println("put success");
             }
@@ -632,6 +347,10 @@ public class OBHBaseClient extends DB {
         } catch (ConcurrentModificationException e) {
             //do nothing for now...hope this is rare
             return SERVICE_UNAVAILABLE;
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("put failed");
+            return ERROR;
         }
         return OK;
     }
@@ -652,7 +371,7 @@ public class OBHBaseClient extends DB {
         Delete delete = new Delete(Bytes.toBytes(key));
         delete.addFamily(columnFamilyBytes);
         try {
-            connection.getTable(TableName.valueOf(tableName)).delete(delete);
+            client.delete(delete);
             return OK;
         } catch (IOException e) {
             if (debug) {
@@ -666,10 +385,10 @@ public class OBHBaseClient extends DB {
     public Status batchPut(String table, Map<String, Map<String, ByteIterator>> valuesMap) {
         List<Put> putList = new ArrayList<>();
         valuesMap.forEach((key, values) -> {
-            Put put = new Put(generateK(key).getBytes());
+            Put put = new Put(key.getBytes());
             values.forEach((k, v) -> {
-                if (enableTimeRangeTestMode) {
-                    put.addColumn(columnFamilyBytes, k.getBytes(), generateTs(key), v.toArray());
+                if (version != null) {
+                    put.addColumn(columnFamilyBytes, k.getBytes(), version, v.toArray());
                 } else {
                     put.addColumn(columnFamilyBytes, k.getBytes(), v.toArray());
                 }
@@ -677,12 +396,16 @@ public class OBHBaseClient extends DB {
             putList.add(put);
         });
         try {
-            connection.getTable(TableName.valueOf(tableName)).put(putList);
+            client.put(putList);
         } catch (IOException e) {
             if (debug) {
                 System.err.println("Error doing batch: " + e);
             }
             return Status.ERROR;
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("batchPut failed");
+            return ERROR;
         }
         return Status.OK;
     }
@@ -691,7 +414,7 @@ public class OBHBaseClient extends DB {
     public Status batchRead(String table, Set<String> fields, Map<String, Map<String, ByteIterator>> valuesMap) {
         List<Get> getList = new ArrayList<>();
         valuesMap.keySet().forEach(key -> {
-            Get get = new Get(generateK(key).getBytes());
+            Get get = new Get(key.getBytes());
             if (fields == null) {
                 get.addFamily(columnFamilyBytes);
             } else {
@@ -703,12 +426,12 @@ public class OBHBaseClient extends DB {
         });
         try {
             Result[] res = null;
-            res = connection.getTable(TableName.valueOf(tableName)).get(getList);
+            res = client.get(getList);
             if (res == null || res.length == 0) {
                 if (debug) {
                     System.out.println("Result is empty");
                 }
-                return Status.NOT_FOUND;
+                return Status.OK;
             }
             for (int i = 0; i < res.length; i++) {
                 if (res[i] == null || ((Result)res[i]).isEmpty()) {

@@ -1,0 +1,19 @@
+.client-config-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--spacing-md);
+  align-items: end;
+}
+
+.checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  padding-top: 20px;
+}
+

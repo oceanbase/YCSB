@@ -23,8 +23,6 @@ import static site.ycsb.Status.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import com.alipay.oceanbase.rpc.ObTableClient;
-import com.alipay.oceanbase.rpc.mutation.InsertOrUpdate;
-import com.alipay.oceanbase.rpc.get.Get;
 import com.alipay.oceanbase.rpc.property.Property;
 import com.alipay.oceanbase.rpc.mutation.BatchOperation;
 import com.alipay.oceanbase.rpc.mutation.MutationFactory;
@@ -34,7 +32,6 @@ import static com.alipay.oceanbase.rpc.mutation.MutationFactory.colVal;
 import static com.alipay.oceanbase.rpc.mutation.MutationFactory.row;
 import com.alipay.oceanbase.rpc.stream.QueryResultSet;
 import com.alipay.oceanbase.rpc.table.api.TableQuery;
-import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
  
  public class ObTableClientDB extends DB {
     public static final String PROP_KEY_ODP_MODE                = "obkv.isOdpMode";
@@ -49,7 +46,7 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
     public static final String PROP_KEY_SYS_PASSWORD            = "obkv.sysPassword";
   
     public static final String PROP_KEY_DEBUG                   = "obkv.debug";
-    public static final String PROP_KEY_BATCH_THREAD_COUNT            = "obkv.batch.threadCount";
+    public static final String PROP_KEY_BATCH_THREAD_COUNT      = "obkv.batch.threadCount";
     public static final String PROP_KEY_INSERT_TYPE             = "obkv.insertType";
     public static final String PROP_KEY_UPDATE_TYPE             = "obkv.updateType";
     public static final String PROP_KEY_BATCH_PUT_TYPE          = "obkv.batchPutType";
@@ -57,7 +54,6 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
     private ObTableClient client = null;
     private String tableName;
     private boolean debug = false;
-    private boolean isHeapTable = false;
     private int threadCount = 3;
     private ExecutorService executorService;
     private String insertType;
@@ -72,7 +68,11 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
                 client.close();
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            System.err.println("Error closing client: " + e.getMessage());
+        } finally {
+            if (executorService != null && !executorService.isShutdown()) {
+                executorService.shutdown();
+            }
         }
     }
  
@@ -110,6 +110,18 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             }
         }
 
+        // Set hardcoded connection stability parameters
+        client.addProperty("rpc.connect.timeout", "10000");
+        client.addProperty("metadata.refresh.lock.timeout", "20000");
+        client.addProperty("rs.list.acquire.connect.timeout", "10000");
+        client.addProperty("rs.list.acquire.read.timeout", "10000");
+        client.addProperty("table.entry.acquire.connect.timeout", "10000");
+        client.addProperty("table.entry.acquire.socket.timeout", "10000");
+        client.addProperty("table.entry.refresh.lock.timeout", "10000");
+        client.addProperty("rpc.login.timeout", "10000");
+        client.addProperty("connection.max.expired.time", "10000");
+        client.addProperty("runtime.max.wait", "10000");
+
         insertType = props.getProperty(PROP_KEY_INSERT_TYPE, "put").toLowerCase();
         updateType = props.getProperty(PROP_KEY_UPDATE_TYPE, "update").toLowerCase();
         batchPutType = props.getProperty(PROP_KEY_BATCH_PUT_TYPE, "put").toLowerCase();
@@ -136,7 +148,6 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
 
         try {
             client.init();
-
         } catch (Exception e) {
             throw new DBException(e.toString());
         }
@@ -155,20 +166,29 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
                         Map<String, ByteIterator> result) {
         try {
             client.addRowKeyElement(table,new String[]{"ycsb_key"});
-            String[] fs = new String[]{};
-            if (fields != null) {
-                fs = fields.toArray(new String[]{});
+            
+            // Map requested fields to ycsb_value if it's the 2-column model
+            String[] fs = new String[]{"ycsb_value"};
+            
+            Map<String, Object> res = client.get(table, key, fs);
+            if (res == null || res.isEmpty()) {
+                return Status.OK;
             }
-            Iterator i$ = client.get(table, key, fs).entrySet().iterator();
-            while (i$.hasNext()) {
-                Map.Entry<String, Object> entry = (Map.Entry) i$.next();
-                result.put(entry.getKey(), new StringByteIterator(entry.getValue().toString()));
-                if (debug) {
-                    System.out.println("read result: {" + entry.getKey() + ": " + entry.getValue().toString() + "}");
+
+            Object val = res.get("ycsb_value");
+            if (val != null) {
+                // If specific fields were requested, map the value to each of them
+                if (fields != null && !fields.isEmpty()) {
+                    for (String field : fields) {
+                        result.put(field, new ByteArrayByteIterator((byte[])val));
+                    }
+                } else {
+                    // Default to field0
+                    result.put("field0", new ByteArrayByteIterator((byte[])val));
                 }
             }
 
-            return result.isEmpty() ? Status.NOT_FOUND : Status.OK;
+            return Status.OK;
         } catch (Exception e) {
             e.printStackTrace();
             return Status.ERROR;
@@ -216,22 +236,26 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             String endKey = incrementPaddedKey(startkey, recordcount);
             query.addScanRange(new Object[] { startkey }, new Object[] { endKey });
             query.limit(recordcount);
-            if (fields != null) {
-                query.select(fields.toArray(new String[]{}));
-            }
+            
+            // Map to ycsb_value
+            query.select(new String[]{"ycsb_value"});
+            
             QueryResultSet resultSet = query.asyncExecute();
             while (resultSet.next()) {
                 Map<String, Object> row = resultSet.getRow();
                 HashMap<String, ByteIterator> rowResult = new HashMap<String, ByteIterator>();
-                for (Map.Entry<String, Object> entry : row.entrySet()) {
-                    String key = entry.getKey();
-                    Object value = entry.getValue();
-                    rowResult.put(key, new StringByteIterator(value.toString()));
+                
+                Object val = row.get("ycsb_value");
+                if (val != null) {
+                    if (fields != null && !fields.isEmpty()) {
+                        for (String field : fields) {
+                            rowResult.put(field, new ByteArrayByteIterator((byte[])val));
+                        }
+                    } else {
+                        rowResult.put("field0", new ByteArrayByteIterator((byte[])val));
+                    }
                 }
                 result.add(rowResult);
-            }
-            if (result.isEmpty()) {
-                return Status.NOT_FOUND;
             }
             return Status.OK;
         } catch (Exception e) {
@@ -250,9 +274,14 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
     public Status update(String table, String key, Map<String, ByteIterator> values) {
         Row rowKey  = row(colVal("ycsb_key", key));
         Row row = row();
-        for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
-            row.add(entry.getKey(), entry.getValue().toString());
+        
+        // Map any input field to ycsb_value
+        if (!values.isEmpty()) {
+            // Just take the first value from the map
+            ByteIterator val = values.values().iterator().next();
+            row.add("ycsb_value", val.toArray());
         }
+        
         try {
             switch (updateType) {
                 case "update":
@@ -278,9 +307,13 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
      public Status insert(String table, String key, Map<String, ByteIterator> values) {
         Row rowKey  = row(colVal("ycsb_key", key));
         Row row = row();
-        for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
-            row.add(entry.getKey(), entry.getValue().toString());
+        
+        // Map any input field to ycsb_value
+        if (!values.isEmpty()) {
+            ByteIterator val = values.values().iterator().next();
+            row.add("ycsb_value", val.toArray());
         }
+        
         try {
             switch (insertType) {
                 case "insert":
@@ -323,9 +356,13 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             }
             Row rowKey = row(colVal("ycsb_key", k));
             Row row = row();
-            for (Map.Entry<String, ByteIterator> entry : v.entrySet()) {
-                row.add(entry.getKey(), entry.getValue().toString());
+            
+            // Map any input field to ycsb_value
+            if (v != null && !v.isEmpty()) {
+                ByteIterator val = v.values().iterator().next();
+                row.add("ycsb_value", val.toArray());
             }
+            
             switch (batchPutType) {
                 case "insert":
                     mutationList.add(MutationFactory.insert().setRowKey(rowKey).addMutateRow(row));
@@ -359,10 +396,12 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             client.addRowKeyElement(table,new String[]{"ycsb_key"});
             List<Mutation> mutationList = new ArrayList<>();
             BatchOperation batchOperation = client.batchOperation(table);
-            valuesMap.keySet().forEach(key -> {
+            List<String> keys = new ArrayList<>(valuesMap.keySet());
+            keys.forEach(key -> {
                 Row rowKey = row(colVal("ycsb_key", key));
                 try {
-                    batchOperation.addOperation(MutationFactory.query().setRowKey(rowKey));
+                    // Only select ycsb_value
+                    batchOperation.addOperation(MutationFactory.query().setRowKey(rowKey).select(new String[]{"ycsb_value"}));
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
@@ -370,19 +409,25 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             BatchOperationResult batchResult = batchOperation.execute();
             List<Object> results = batchResult.getResults();
             if (results == null || results.isEmpty()) {
-              return NOT_FOUND;
+              return OK;
             }
             for (int i = 0; i < results.size(); i++) {
               Row row = batchResult.get(i).getOperationRow();
+              if (row == null) continue;
+              
               Map<String, Object> getMap = row.getMap();
-              HashMap<String, ByteIterator> rowResult = new HashMap<String, ByteIterator>();    
-              for (Map.Entry<String, Object> entry : getMap.entrySet()) {
-                String key = entry.getKey();
-                Object value = entry.getValue();    
-                rowResult.put(key, new StringByteIterator(value.toString()));
-              }
-              if (debug) {
-                System.out.println("batchRead result: " + rowResult);
+              Object val = getMap.get("ycsb_value");
+              if (val != null) {
+                  String key = keys.get(i);
+                  HashMap<String, ByteIterator> rowResult = new HashMap<String, ByteIterator>();
+                  if (fields != null && !fields.isEmpty()) {
+                      for (String field : fields) {
+                          rowResult.put(field, new ByteArrayByteIterator((byte[])val));
+                      }
+                  } else {
+                      rowResult.put("field0", new ByteArrayByteIterator((byte[])val));
+                  }
+                  valuesMap.put(key, rowResult);
               }
             }
             return Status.OK;

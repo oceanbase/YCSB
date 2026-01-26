@@ -28,7 +28,6 @@ echo "=========================================="
 
 # 默认 DB 类（range 表）
 DEFAULT_DB_CLASS="com.oceanbase.obkv.table.ycsb.ObTableClientDB"
-RK_DB_CLASS="com.oceanbase.obkv.table.ycsb.ObTableClientDBRK"
 TABLE_MODE="range"  # range | range_key
 
 # 解析全局选项（必须放在 OPERATION 之前）
@@ -44,7 +43,6 @@ while [[ $# -gt 0 ]]; do
             echo "全局选项："
             echo "  --table-mode range|range_key  指定测试表模式对应的 DB 类（默认 range）"
             echo "    - range     : $DEFAULT_DB_CLASS"
-            echo "    - range_key : $RK_DB_CLASS"
             echo ""
             echo "操作说明："
             echo "  put        - 执行写入测试"
@@ -73,9 +71,6 @@ case "$TABLE_MODE" in
     range|"")
         DB_CLASS="$DEFAULT_DB_CLASS"
         ;;
-    range_key)
-        DB_CLASS="$RK_DB_CLASS"
-        ;;
     *)
         echo "错误：不支持的 --table-mode：$TABLE_MODE"
         echo "支持的模式：range, range_key"
@@ -103,7 +98,6 @@ if [ $# -eq 0 ]; then
     echo "选项说明："
     echo "  --table-mode range|range_key  指定测试表模式对应的 DB 类（默认 range）"
     echo "    - range     : $DEFAULT_DB_CLASS"
-    echo "    - range_key : $RK_DB_CLASS"
     echo "  put        - 执行写入测试"
     echo "  read       - 执行读取测试"
     echo "  scan       - 执行扫描测试"

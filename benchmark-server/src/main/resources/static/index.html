@@ -1,0 +1,1642 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OBKV 压测控制台</title>
+    <style>
+        :root {
+            --bg-primary: #0a0e14;
+            --bg-secondary: #0d1117;
+            --bg-card: #1c2128;
+            --bg-input: #0d1117;
+            --border: #30363d;
+            --border-focus: #58a6ff;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent: #58a6ff;
+            --success: #3fb950;
+            --error: #f85149;
+            --warning: #d29922;
+            --cyan: #39c5cf;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: linear-gradient(90deg, #0d1117, #161b22, #0d1117);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon { font-size: 28px; }
+        
+        .logo-text {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #58a6ff, #39c5cf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-title {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-left: 16px;
+            padding-left: 16px;
+            border-left: 1px solid var(--border);
+        }
+
+        .badge {
+            padding: 6px 14px;
+            background: rgba(88, 166, 255, 0.1);
+            border: 1px solid var(--accent);
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--accent);
+            text-transform: uppercase;
+        }
+
+        .main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            background: #161b22;
+            border-bottom: 1px solid var(--border);
+            position: relative;
+        }
+
+        .reset-btn {
+            position: absolute;
+            top: 16px;
+            right: 20px;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .reset-btn:hover {
+            background: var(--bg-secondary);
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .card-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #1f6feb, #58a6ff);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .card-title { font-size: 15px; font-weight: 600; }
+        .card-subtitle { font-size: 12px; color: var(--text-secondary); }
+        .card-body { padding: 20px; }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .form-group { display: flex; flex-direction: column; gap: 6px; }
+        
+        .form-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-input, .form-select {
+            padding: 10px 12px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus, .form-select:focus {
+            outline: none;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #1f6feb, #58a6ff);
+            color: white;
+        }
+        .btn-primary:hover { box-shadow: 0 0 20px rgba(88, 166, 255, 0.3); }
+
+        .btn-success {
+            background: linear-gradient(135deg, #238636, #3fb950);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #21262d;
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-danger {
+            background: var(--error);
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .mode-selector {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 12px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .mode-btn.active {
+            border-color: var(--accent);
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--accent);
+        }
+
+        .workload-selector {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .workload-btn {
+            padding: 12px 8px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .workload-btn:hover { border-color: var(--text-secondary); }
+        
+        .workload-btn.active {
+            border-color: var(--accent);
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--accent);
+        }
+
+        .workload-name { font-size: 20px; font-weight: 700; }
+        .workload-desc { font-size: 9px; text-transform: uppercase; }
+
+        .workload-info {
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+
+        .workload-info-label { font-weight: 600; }
+        .workload-info-value { color: var(--cyan); }
+
+        .log-container {
+            height: 350px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+        }
+
+        .log-line {
+            display: flex;
+            padding: 2px 12px;
+            border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+        }
+
+        .log-line:hover { background: rgba(33, 38, 45, 0.5); }
+        .log-num { width: 40px; color: var(--text-secondary); text-align: right; padding-right: 12px; }
+        .log-content { flex: 1; color: var(--text-secondary); word-break: break-all; }
+        .log-error .log-content { color: var(--error); }
+        .log-success .log-content { color: var(--success); }
+        .log-metric .log-content { color: var(--cyan); }
+
+        .status-badge {
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            border-radius: 20px;
+        }
+
+        .status-running {
+            background: rgba(88, 166, 255, 0.2);
+            color: var(--accent);
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+        .status-error { background: rgba(248, 81, 73, 0.2); color: var(--error); }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .result-box {
+            margin-top: 16px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .result-success {
+            background: rgba(63, 185, 80, 0.1);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+
+        .result-error {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid var(--error);
+            color: var(--error);
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+
+        .checkbox-group input { accent-color: var(--accent); }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-icon { font-size: 48px; opacity: 0.5; margin-bottom: 12px; }
+
+        .log-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+
+        .actions-row {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-top: 16px;
+        }
+
+        .header-center {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .model-switcher {
+            display: flex;
+            background: var(--bg-secondary);
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .model-switcher button {
+            padding: 6px 16px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .model-switcher button.active {
+            background: var(--bg-card);
+            color: var(--accent);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .model-switcher button.active.table {
+            color: var(--success);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .mode-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        @media (max-width: 1200px) {
+            .main { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 768px) {
+            .workload-selector { grid-template-columns: repeat(3, 1fr); }
+            .form-row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <span class="logo-icon">⚡</span>
+            <span class="logo-text">OBKV Benchmark</span>
+            <span class="header-title">压测控制台</span>
+        </div>
+        
+        <div class="header-center">
+            <div class="model-switcher">
+                <button id="model-hbase" class="active" onclick="setModelType('hbase')">HBase Model</button>
+                <button id="model-table" class="table" onclick="setModelType('table')">Table Model</button>
+                <button id="model-segment" class="segment" onclick="setModelType('segment_load')">分段导入 (Load)</button>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <span class="mode-label">Mode:</span>
+            <span class="badge" id="current-model-badge">HBASE</span>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- 左侧面板 -->
+        <div class="left-column">
+            <!-- SQL 连接 -->
+            <div class="card" id="card-sql">
+                <div class="card-header">
+                    <div class="card-icon">🔌</div>
+                    <div>
+                        <div class="card-title">SQL 连接参数</div>
+                        <div class="card-subtitle">用于 DDL 操作的数据库连接</div>
+                    </div>
+                    <button class="reset-btn" onclick="resetCardParams('card-sql')">🔄 重置</button>
+                </div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">IP 地址</label>
+                            <input type="text" class="form-input" id="sql-ip" placeholder="10.0.0.1">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">端口</label>
+                            <input type="number" class="form-input" id="sql-port" value="2883" data-default="2883">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">用户名</label>
+                            <input type="text" class="form-input" id="sql-user" placeholder="user@tenant#cluster">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">密码 (可选)</label>
+                            <input type="password" class="form-input" id="sql-password" placeholder="无密码可留空">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">数据库</label>
+                            <input type="text" class="form-input" id="sql-database" placeholder="test">
+                        </div>
+                        <div class="form-group" style="justify-content: flex-end;">
+                            <button class="btn btn-secondary" onclick="testSqlConnection()">测试连接</button>
+                        </div>
+                    </div>
+                    <div id="sql-result"></div>
+                </div>
+            </div>
+
+            <!-- DDL 操作 -->
+            <div class="card" id="card-ddl">
+                <div class="card-header">
+                    <div class="card-icon">📋</div>
+                    <div>
+                        <div class="card-title">DDL 操作</div>
+                        <div class="card-subtitle">表管理：建表 / 清空表 / 删表</div>
+                    </div>
+                    <button class="reset-btn" onclick="resetCardParams('card-ddl')">🔄 重置</button>
+                </div>
+                <div class="card-body">
+                    <div class="section-title">表信息</div>
+                    <div class="form-row" style="grid-template-columns: repeat(3, 1fr);">
+                        <div class="form-group">
+                            <label class="form-label">表名</label>
+                            <input type="text" class="form-input" id="table-name" value="ycsb_test" data-default="ycsb_test">
+                        </div>
+                        <div class="form-group" id="cf-group">
+                            <label class="form-label">列族</label>
+                            <input type="text" class="form-input" id="column-family" value="cf" data-default="cf">
+                        </div>
+                        <div class="form-group"></div>
+                    </div>
+                    <div class="section-title">分区类型</div>
+                    <div class="mode-selector" style="margin-bottom: 16px;">
+                        <div class="mode-btn active" id="partition-range" onclick="setPartitionType('range')">📊 Range 分区</div>
+                        <div class="mode-btn" id="partition-key" onclick="setPartitionType('key')">🔑 Key 分区</div>
+                    </div>
+                    <div id="range-params">
+                        <div class="section-title">Range 分区参数</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">总行数</label>
+                                <input type="number" class="form-input" id="max-key" value="100000000" data-default="100000000">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">分区数</label>
+                                <input type="number" class="form-input" id="partition-count" value="360" data-default="360">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Key 长度</label>
+                                <input type="number" class="form-input" id="key-length" value="12" data-default="12">
+                            </div>
+                        </div>
+                    </div>
+                    <div id="key-params" style="display: none;">
+                        <div class="section-title">Key 分区参数</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">分区数</label>
+                                <input type="number" class="form-input" id="key-partition-count" value="360">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-secondary" onclick="previewSql()">预览 SQL</button>
+                        <button class="btn btn-success" onclick="createTable()">建表</button>
+                        <button class="btn btn-secondary" onclick="truncateTable()">清空表</button>
+                        <button class="btn btn-danger" onclick="dropTable()">删表</button>
+                        <button class="btn btn-secondary" onclick="setMinimalBinlog()">minimal</button>
+                        <button class="btn btn-secondary" id="btn-undo-retention" onclick="setUndoRetention()">undo_retention=0</button>
+                    </div>
+                    <div class="btn-group" id="table-specific-ops" style="margin-top: 10px; display: none; align-items: center; gap: 8px;">
+                        <button class="btn btn-secondary" onclick="setBatchSize()">batch_size=</button>
+                        <input type="number" class="form-input" id="batch-size-val" value="10" style="width: 70px;">
+                        <button class="btn btn-secondary" onclick="setRwMode()">rw_mode=</button>
+                        <input type="text" class="form-input" id="rw-mode-val" value="all" style="width: 70px;">
+                    </div>
+                    <div id="ddl-result"></div>
+                </div>
+            </div>
+
+            <!-- OBKV 连接 -->
+            <div class="card" id="card-obkv">
+                <div class="card-header">
+                    <div class="card-icon">🔗</div>
+                    <div>
+                        <div class="card-title">OBKV 连接模式</div>
+                        <div class="card-subtitle">用于压测的数据库连接</div>
+                    </div>
+                    <button class="reset-btn" onclick="resetCardParams('card-obkv')">🔄 重置</button>
+                </div>
+                <div class="card-body">
+                    <div class="mode-selector">
+                        <div class="mode-btn active" id="mode-odp" onclick="setMode('odp')">🌐 ODP 模式 (Proxy)</div>
+                        <div class="mode-btn" id="mode-direct" onclick="setMode('direct')">⚡ 直连模式</div>
+                    </div>
+                    <div id="odp-fields">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">ODP IP</label>
+                                <input type="text" class="form-input" id="odp-ip" placeholder="10.0.0.1">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">ODP Port</label>
+                                <input type="number" class="form-input" id="odp-port" value="2885" data-default="2885">
+                            </div>
+                        </div>
+                    </div>
+                    <div id="direct-fields" style="display: none;">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Param URL</label>
+                                <input type="text" class="form-input" id="param-url" placeholder="http://...">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Sys UserName</label>
+                                <input type="text" class="form-input" id="sys-user" placeholder="root">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Sys Password (可选)</label>
+                                <input type="password" class="form-input" id="sys-password" placeholder="无密码可留空">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="section-title">公共参数</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Full UserName</label>
+                            <input type="text" class="form-input" id="full-username" placeholder="user@tenant#cluster">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Password (可选)</label>
+                            <input type="password" class="form-input" id="obkv-password" placeholder="无密码可留空">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Database</label>
+                            <input type="text" class="form-input" id="obkv-database" placeholder="test">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 客户端参数 -->
+            <div class="card" id="card-client">
+                <div class="card-header">
+                    <div class="card-icon">⚙️</div>
+                    <div>
+                        <div class="card-title">客户端参数</div>
+                        <div class="card-subtitle">连接池、超时、调试配置</div>
+                    </div>
+                    <button class="reset-btn" onclick="resetCardParams('card-client')">🔄 重置</button>
+                </div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">连接池大小</label>
+                            <input type="number" class="form-input" id="pool-size" value="100" data-default="100">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">服务端超时 (ms)</label>
+                            <input type="number" class="form-input" id="operation-timeout" value="10000" data-default="10000">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">客户端超时 (ms)</label>
+                            <input type="number" class="form-input" id="execute-timeout" value="15000" data-default="15000">
+                        </div>
+                        <div class="form-group" style="justify-content: flex-end;">
+                            <label class="checkbox-group">
+                                <input type="checkbox" id="debug-mode">
+                                <span>开启 Debug 日志</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Netty Low Watermark (可选)</label>
+                            <input type="number" class="form-input" id="netty-low-watermark" placeholder="默认不设置">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Netty High Watermark (可选)</label>
+                            <input type="number" class="form-input" id="netty-high-watermark" placeholder="默认不设置">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧面板 -->
+        <div class="right-column">
+            <!-- 负载控制 -->
+            <div class="card" id="workload-control-card">
+                <div class="card-header">
+                    <div class="card-icon">🚀</div>
+                    <div>
+                        <div class="card-title">负载控制</div>
+                        <div class="card-subtitle">Workload A-F 压测配置</div>
+                    </div>
+                    <button class="reset-btn" onclick="resetCardParams('workload-control-card')">🔄 重置</button>
+                </div>
+                <div class="card-body">
+                    <div id="workload-selector-container">
+                        <div class="workload-selector" id="workload-selector">
+                            <div class="workload-btn active" data-workload="workloada" onclick="selectWorkload('workloada')">
+                                <div class="workload-name">A</div>
+                                <div class="workload-desc">Update Heavy</div>
+                            </div>
+                            <!-- ... existing workload buttons ... -->
+                            <div class="workload-btn" data-workload="workloadb" onclick="selectWorkload('workloadb')">
+                                <div class="workload-name">B</div>
+                                <div class="workload-desc">Read Mostly</div>
+                            </div>
+                            <div class="workload-btn" data-workload="workloadc" onclick="selectWorkload('workloadc')">
+                                <div class="workload-name">C</div>
+                                <div class="workload-desc">Read Only</div>
+                            </div>
+                            <div class="workload-btn" data-workload="workloadd" onclick="selectWorkload('workloadd')">
+                                <div class="workload-name">D</div>
+                                <div class="workload-desc">Read Latest</div>
+                            </div>
+                            <div class="workload-btn" data-workload="workloade" onclick="selectWorkload('workloade')">
+                                <div class="workload-name">E</div>
+                                <div class="workload-desc">Short Ranges</div>
+                            </div>
+                            <div class="workload-btn" data-workload="workloadf" onclick="selectWorkload('workloadf')">
+                                <div class="workload-name">F</div>
+                                <div class="workload-desc">RMW</div>
+                            </div>
+                            <div class="workload-btn" data-workload="workloadg" onclick="selectWorkload('workloadg')">
+                                <div class="workload-name">G</div>
+                                <div class="workload-desc">Custom</div>
+                            </div>
+                        </div>
+                        <div class="workload-info" id="workload-info">
+                            <span class="workload-info-label">Workload A:</span>
+                            <span class="workload-info-value">Update Heavy - 50% Read / 50% Update</span>
+                        </div>
+                    </div>
+
+                    <div id="segment-load-header" style="display: none;">
+                        <div class="section-title">分段导入配置</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">导入目标模型</label>
+                                <select class="form-select" id="segment-target-model" onchange="setModelType('segment_load')">
+                                    <option value="hbase">HBase Model</option>
+                                    <option value="table">Table Model</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section-title">参数配置</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Record Count (总记录数)</label>
+                            <input type="number" class="form-input" id="record-count" value="100000000" data-default="100000000">
+                        </div>
+                        <div class="form-group" id="op-count-group">
+                            <label class="form-label">Operation Count</label>
+                            <input type="number" class="form-input" id="operation-count" value="100000000" data-default="100000000">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" id="thread-count-label">线程数 (Threads)</label>
+                            <input type="number" class="form-input" id="thread-count" value="200" data-default="200">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" id="target-group">
+                            <label class="form-label">Target (ops/s, 0=无限)</label>
+                            <input type="number" class="form-input" id="target" value="0">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Field Length (bytes)</label>
+                            <input type="number" class="form-input" id="field-length" value="2048" data-default="2048">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">列数 (Field Count)</label>
+                            <input type="number" class="form-input" id="field-count" value="1" placeholder="默认1" data-default="1">
+                        </div>
+                        <div class="form-group" id="segment-count-group" style="display: none;">
+                            <label class="form-label">分段数 (Segments)</label>
+                            <input type="number" class="form-input" id="segment-count" value="10" data-default="10">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Zero Padding</label>
+                            <input type="number" class="form-input" id="zero-padding" value="12" data-default="12">
+                        </div>
+                        <div class="form-group" id="retry-limit-group">
+                            <label class="form-label">重试次数 (Retry Limit)</label>
+                            <input type="number" class="form-input" id="retry-limit" value="0" data-default="0">
+                        </div>
+                        <div class="form-group" id="retry-interval-group">
+                            <label class="form-label">重试间隔 (秒, Retry Interval)</label>
+                            <input type="number" step="0.1" class="form-input" id="retry-interval" value="0.1" data-default="0.1">
+                        </div>
+                        <div class="form-group" id="batch-wait-group">
+                            <label class="form-label">批量等待时间 (秒, Max Wait)</label>
+                            <input type="number" class="form-input" id="batch-wait" value="1200" data-default="1200">
+                        </div>
+                        <div class="form-group" id="batch-put-size-group">
+                            <label class="form-label">load单批大小 (Batch Put Size)</label>
+                            <input type="number" class="form-input" id="batch-put-size" placeholder="默认不设置">
+                        </div>
+                        <div class="form-group" id="hbase-version-group">
+                            <label class="form-label">HBase 写入版本 (Version)</label>
+                            <input type="number" class="form-input" id="hbase-version" placeholder="默认不设置">
+                        </div>
+                    </div>
+                    
+                    <div id="extra-params-group">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">运行时间限制 (0=不限制)</label>
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    <input type="number" class="form-input" id="max-hours" value="0" min="0" style="width: 70px;">
+                                    <span style="color: var(--text-secondary); font-size: 12px;">时</span>
+                                    <input type="number" class="form-input" id="max-minutes" value="0" min="0" max="59" style="width: 70px;">
+                                    <span style="color: var(--text-secondary); font-size: 12px;">分</span>
+                                </div>
+                            </div>
+                            <div class="form-group" style="justify-content: flex-end; align-items: flex-end;">
+                                <div id="time-hint" style="font-size: 11px; color: var(--text-secondary);">不限制运行时间</div>
+                            </div>
+                        </div>
+                        <div class="section-title">数据分布</div>
+                        <div class="form-row" style="margin-bottom: 16px;">
+                            <div class="form-group" style="flex: 1;">
+                                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                                    <label style="display: flex; align-items: center; cursor: pointer; gap: 6px;"><input type="radio" name="request-distribution" value=""><span>默认</span></label>
+                                    <label style="display: flex; align-items: center; cursor: pointer; gap: 6px;"><input type="radio" name="request-distribution" value="uniform" checked><span>uniform</span></label>
+                                    <label style="display: flex; align-items: center; cursor: pointer; gap: 6px;"><input type="radio" name="request-distribution" value="zipfian"><span>zipfian</span></label>
+                                    <label style="display: flex; align-items: center; cursor: pointer; gap: 6px;"><input type="radio" name="request-distribution" value="latest"><span>latest</span></label>
+                                    <label style="display: flex; align-items: center; cursor: pointer; gap: 6px;"><input type="radio" name="request-distribution" value="sequential"><span>sequential</span></label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="section-title">操作比例</div>
+                        <div class="form-row">
+                            <div class="form-group"><label class="form-label">Read</label><input type="number" class="form-input" id="read-proportion" step="0.01"></div>
+                            <div class="form-group"><label class="form-label">Update</label><input type="number" class="form-input" id="update-proportion" step="0.01"></div>
+                            <div class="form-group"><label class="form-label">Scan</label><input type="number" class="form-input" id="scan-proportion" step="0.01"></div>
+                            <div class="form-group"><label class="form-label">Insert</label><input type="number" class="form-input" id="insert-proportion" step="0.01"></div>
+                        </div>
+                    </div>
+
+                    <div class="actions-row">
+                        <button class="btn btn-secondary" onclick="executeLoad()" id="btn-load">📥 Load 数据</button>
+                        <button class="btn btn-secondary" onclick="executeSegmentLoad()" id="btn-segment-load" style="display: none;">📑 分段并行 Load</button>
+                        <button class="btn btn-primary" onclick="executeRun()" id="btn-run">▶️ Run 测试</button>
+                        <button class="btn btn-danger" onclick="stopTask()" id="btn-stop" style="display: none;">⏹️ 停止</button>
+                    </div>
+                    <div class="actions-row" style="margin-top: 12px;">
+                        <button class="btn btn-secondary" onclick="clearResults()" id="btn-clear-results" style="font-size: 12px;">🗑️ 清理结果文件</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 执行日志 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">📜</div>
+                    <div>
+                        <div class="card-title">执行日志</div>
+                        <div class="card-subtitle" id="task-info">实时查看任务执行状态</div>
+                    </div>
+                    <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+                        <span class="status-badge" id="task-status" style="display: none;"></span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="log-toolbar">
+                        <label class="checkbox-group">
+                            <input type="checkbox" id="auto-scroll" checked>
+                            <span>自动滚动</span>
+                        </label>
+                        <span id="log-count">0 行</span>
+                    </div>
+                    <div class="log-container" id="log-container">
+                        <div class="empty-state">
+                            <div class="empty-icon">📋</div>
+                            <div>暂无任务运行</div>
+                            <div style="font-size: 12px; margin-top: 8px;">选择一个 Workload 并点击 Load 或 Run 开始执行</div>
+                        </div>
+                    </div>
+                    <div id="task-result"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 状态变量
+        let modelType = 'hbase';
+        let currentMode = 'odp';
+        let currentPartitionType = 'range';
+        let currentWorkload = 'workloada';
+        let currentTaskId = null;
+        let ws = null;
+        let logs = [];
+
+        // 切换模型类型
+        function setModelType(type) {
+            const isSegmentLoad = type === 'segment_load';
+            if (isSegmentLoad) {
+                // 如果是分段导入，底层模型默认为上次选择的，或者默认为 hbase
+                modelType = document.getElementById('segment-target-model').value || 'hbase';
+            } else {
+                modelType = type;
+            }
+            
+            document.getElementById('model-hbase').classList.toggle('active', type === 'hbase');
+            document.getElementById('model-table').classList.toggle('active', type === 'table');
+            document.getElementById('model-segment').classList.toggle('active', isSegmentLoad);
+            document.getElementById('current-model-badge').textContent = type.toUpperCase();
+            
+            // 元素引用
+            const cfGroup = document.getElementById('cf-group');
+            const undoBtn = document.getElementById('btn-undo-retention');
+            const tableOps = document.getElementById('table-specific-ops');
+            const workloadSelector = document.getElementById('workload-selector-container');
+            const segmentHeader = document.getElementById('segment-load-header');
+            const opCountGroup = document.getElementById('op-count-group');
+            const targetGroup = document.getElementById('target-group');
+            const extraParams = document.getElementById('extra-params-group');
+            const segmentCountGroup = document.getElementById('segment-count-group');
+            
+            const btnLoad = document.getElementById('btn-load');
+            const btnSegmentLoad = document.getElementById('btn-segment-load');
+            const btnRun = document.getElementById('btn-run');
+
+            const retryGroup = document.getElementById('retry-limit-group');
+            const retryIntervalGroup = document.getElementById('retry-interval-group');
+            const batchWaitGroup = document.getElementById('batch-wait-group');
+            const batchPutSizeGroup = document.getElementById('batch-put-size-group');
+            const hbaseVersionGroup = document.getElementById('hbase-version-group');
+            const threadLabel = document.getElementById('thread-count-label');
+
+            // 切换显示逻辑
+            if (isSegmentLoad) {
+                // 分段导入模式：只显示导入相关参数
+                workloadSelector.style.display = 'none';
+                segmentHeader.style.display = 'block';
+                opCountGroup.style.display = 'none';
+                targetGroup.style.display = 'none';
+                extraParams.style.display = 'none';
+                segmentCountGroup.style.display = 'block';
+                
+                btnLoad.style.display = 'none';
+                btnSegmentLoad.style.display = 'inline-flex';
+                btnRun.style.display = 'none';
+                
+                cfGroup.style.display = modelType === 'hbase' ? 'block' : 'none';
+                undoBtn.style.display = 'none';
+                tableOps.style.display = 'none';
+
+                retryGroup.style.display = 'flex';
+                retryIntervalGroup.style.display = 'flex';
+                batchWaitGroup.style.display = 'flex';
+                batchPutSizeGroup.style.display = 'flex';
+                hbaseVersionGroup.style.display = modelType === 'hbase' ? 'flex' : 'none';
+                threadLabel.textContent = '每段线程数 (Threads)';
+            } else {
+                // 普通测试模式
+                workloadSelector.style.display = 'block';
+                segmentHeader.style.display = 'none';
+                opCountGroup.style.display = 'block';
+                targetGroup.style.display = 'block';
+                extraParams.style.display = 'block';
+                segmentCountGroup.style.display = 'none';
+                
+                btnLoad.style.display = 'inline-flex';
+                btnSegmentLoad.style.display = 'none';
+                btnRun.style.display = 'inline-flex';
+
+                retryGroup.style.display = 'flex';
+                retryIntervalGroup.style.display = 'flex';
+                batchWaitGroup.style.display = 'flex';
+                batchPutSizeGroup.style.display = 'flex';
+                hbaseVersionGroup.style.display = modelType === 'hbase' ? 'flex' : 'none';
+                threadLabel.textContent = '线程数 (Threads)';
+
+                if (type === 'table') {
+                    cfGroup.style.display = 'none';
+                    undoBtn.style.display = 'none';
+                    tableOps.style.display = 'flex';
+                    if (document.getElementById('table-name').value === 'ycsb_test') {
+                        document.getElementById('table-name').value = 'ycsb_table';
+                    }
+                    setPartitionType('key');
+                } else {
+                    cfGroup.style.display = 'block';
+                    undoBtn.style.display = 'inline-flex';
+                    tableOps.style.display = 'none';
+                    if (document.getElementById('table-name').value === 'ycsb_table') {
+                        document.getElementById('table-name').value = 'ycsb_test';
+                    }
+                    setPartitionType('range');
+                }
+            }
+        }
+
+        function resetCardParams(cardId) {
+            const card = document.getElementById(cardId);
+            card.querySelectorAll('input:not([type="radio"]), select').forEach(el => {
+                if (el.hasAttribute('data-default')) {
+                    el.value = el.getAttribute('data-default');
+                } else if (el.id === 'max-key') {
+                    el.value = '100000000';
+                } else if (el.id === 'partition-count' || el.id === 'key-partition-count') {
+                    el.value = '360';
+                } else if (el.id === 'record-count' || el.id === 'operation-count') {
+                    el.value = '100000000';
+                } else if (el.id === 'thread-count') {
+                    el.value = '200';
+                } else if (el.id === 'retry-limit') {
+                    el.value = '0';
+                } else if (el.id === 'retry-interval') {
+                    el.value = '3.0';
+                } else if (el.id === 'batch-wait') {
+                    el.value = '1200';
+                }
+            });
+            updateTimeHint();
+        }
+
+        const WORKLOAD_INFO = {
+            workloada: 'Update Heavy - 50% Read / 50% Update',
+            workloadb: 'Read Mostly - 95% Read / 5% Update',
+            workloadc: 'Read Only - 100% Read',
+            workloadd: 'Read Latest - 95% Read / 5% Insert',
+            workloade: 'Short Ranges - 95% Scan / 5% Insert',
+            workloadf: 'Read-Modify-Write - 50% Read / 50% RMW',
+            workloadg: 'Custom - 自定义读/写/扫描/更新比例'
+        };
+
+        // 初始化时间输入监听
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('max-hours').addEventListener('input', updateTimeHint);
+            document.getElementById('max-minutes').addEventListener('input', updateTimeHint);
+        });
+
+        // 获取最大执行时间（秒）
+        function getMaxExecutionTime() {
+            const hours = parseInt(document.getElementById('max-hours').value) || 0;
+            const minutes = parseInt(document.getElementById('max-minutes').value) || 0;
+            return hours * 3600 + minutes * 60;
+        }
+
+        // 更新时间提示
+        function updateTimeHint() {
+            const seconds = getMaxExecutionTime();
+            const hint = document.getElementById('time-hint');
+            if (seconds === 0) {
+                hint.textContent = '不限制运行时间';
+                hint.style.color = 'var(--text-secondary)';
+            } else {
+                const h = Math.floor(seconds / 3600);
+                const m = Math.floor((seconds % 3600) / 60);
+                let text = '限制运行 ';
+                if (h > 0) text += h + ' 小时 ';
+                if (m > 0) text += m + ' 分钟';
+                hint.textContent = text.trim();
+                hint.style.color = 'var(--warning)';
+            }
+        };
+
+        // 切换连接模式
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('mode-odp').classList.toggle('active', mode === 'odp');
+            document.getElementById('mode-direct').classList.toggle('active', mode === 'direct');
+            document.getElementById('odp-fields').style.display = mode === 'odp' ? 'block' : 'none';
+            document.getElementById('direct-fields').style.display = mode === 'direct' ? 'block' : 'none';
+        }
+
+        // 切换分区类型
+        function setPartitionType(type) {
+            currentPartitionType = type;
+            document.getElementById('partition-range').classList.toggle('active', type === 'range');
+            document.getElementById('partition-key').classList.toggle('active', type === 'key');
+            document.getElementById('range-params').style.display = type === 'range' ? 'block' : 'none';
+            document.getElementById('key-params').style.display = type === 'key' ? 'block' : 'none';
+        }
+
+        // 选择 Workload
+        function selectWorkload(workload) {
+            currentWorkload = workload;
+            document.querySelectorAll('.workload-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.workload === workload);
+            });
+            const name = workload.replace('workload', '').toUpperCase();
+            document.getElementById('workload-info').innerHTML = 
+                `<span class="workload-info-label">Workload ${name}:</span> <span class="workload-info-value">${WORKLOAD_INFO[workload]}</span>`;
+        }
+
+        // API 请求
+        async function api(url, data) {
+            const response = await fetch('/api' + url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            return response.json();
+        }
+
+        // 显示结果
+        function showResult(elementId, success, message) {
+            const el = document.getElementById(elementId);
+            el.innerHTML = `<div class="result-box ${success ? 'result-success' : 'result-error'}">${success ? '✓' : '✗'} ${message}</div>`;
+            setTimeout(() => el.innerHTML = '', 5000);
+        }
+
+        // 获取 SQL 连接配置
+        function getSqlConnection() {
+            return {
+                ip: document.getElementById('sql-ip').value,
+                port: parseInt(document.getElementById('sql-port').value) || 2883,
+                user: document.getElementById('sql-user').value,
+                password: document.getElementById('sql-password').value,
+                database: document.getElementById('sql-database').value
+            };
+        }
+
+        // 获取表配置
+        function getTableConfig() {
+            const config = {
+                modelType: modelType,
+                partitionType: currentPartitionType,
+                tableName: document.getElementById('table-name').value,
+                columnFamily: modelType === 'hbase' ? document.getElementById('column-family').value : 'cf'
+            };
+            
+            if (currentPartitionType === 'range') {
+                config.maxKey = parseInt(document.getElementById('max-key').value) || 1000000;
+                config.partitionCount = parseInt(document.getElementById('partition-count').value) || 360;
+                config.keyLength = parseInt(document.getElementById('key-length').value) || 12;
+            } else {
+                config.keyPartitionCount = parseInt(document.getElementById('key-partition-count').value) || 360;
+            }
+            
+            return config;
+        }
+
+        // 测试 SQL 连接
+        async function testSqlConnection() {
+            try {
+                const result = await api('/sql/test-connection', getSqlConnection());
+                showResult('sql-result', result.success, result.message || (result.success ? '连接成功' : '连接失败'));
+            } catch (e) {
+                showResult('sql-result', false, '连接失败: ' + e.message);
+            }
+        }
+
+        // 预览 SQL
+        async function previewSql() {
+            try {
+                const result = await api('/ddl/generate-sql', getTableConfig());
+                if (result.success && result.data) {
+                    alert('SQL 预览:\n\n' + result.data);
+                } else {
+                    showResult('ddl-result', false, result.message || 'SQL 生成失败');
+                }
+            } catch (e) {
+                showResult('ddl-result', false, '生成失败: ' + e.message);
+            }
+        }
+
+        // 建表
+        async function createTable() {
+            if (!confirm('确定要创建表吗？')) return;
+            try {
+                const result = await api('/ddl/create-table', {
+                    sqlConnection: getSqlConnection(),
+                    tableConfig: getTableConfig()
+                });
+                showResult('ddl-result', result.success, result.data?.message || result.message);
+            } catch (e) {
+                showResult('ddl-result', false, '建表失败: ' + e.message);
+            }
+        }
+
+        // 清空表
+        async function truncateTable() {
+            const config = getTableConfig();
+            const fullName = modelType === 'hbase' ? `${config.tableName}$${config.columnFamily}` : config.tableName;
+            if (!confirm(`确定要清空表 ${fullName} 吗？`)) return;
+            try {
+                const result = await api('/ddl/truncate-table', {
+                    sqlConnection: getSqlConnection(),
+                    tableName: config.tableName,
+                    columnFamily: config.columnFamily,
+                    modelType: modelType
+                });
+                showResult('ddl-result', result.success, result.data?.message || result.message);
+            } catch (e) {
+                showResult('ddl-result', false, '清空表失败: ' + e.message);
+            }
+        }
+
+        // 删表
+        async function dropTable() {
+            const config = getTableConfig();
+            const fullName = modelType === 'hbase' ? `${config.tableName}$${config.columnFamily}` : config.tableName;
+            if (!confirm(`确定要删除表 ${fullName} 吗？此操作不可恢复！`)) return;
+            try {
+                const result = await api('/ddl/drop-table', {
+                    sqlConnection: getSqlConnection(),
+                    tableName: config.tableName,
+                    columnFamily: config.columnFamily,
+                    modelType: modelType
+                });
+                showResult('ddl-result', result.success, result.data?.message || result.message);
+            } catch (e) {
+                showResult('ddl-result', false, '删表失败: ' + e.message);
+            }
+        }
+
+        // 设置 minimal binlog
+        async function setMinimalBinlog() {
+            try {
+                const result = await api('/ddl/minimal-binlog', getSqlConnection());
+                showResult('ddl-result', result.success, result.data?.message || result.message);
+            } catch (e) {
+                showResult('ddl-result', false, '设置失败: ' + e.message);
+            }
+        }
+
+        // 设置 undo_retention=0
+        async function setUndoRetention() {
+            try {
+                const result = await api('/ddl/undo-retention', getSqlConnection());
+                showResult('ddl-result', result.success, result.data?.message || result.message);
+            } catch (e) {
+                showResult('ddl-result', false, '设置失败: ' + e.message);
+            }
+        }
+
+        // 设置 batch_size
+        async function setBatchSize() {
+            try {
+                const size = parseInt(document.getElementById('batch-size-val').value) || 10;
+                const result = await api('/ddl/batch-size', {
+                    sqlConnection: getSqlConnection(),
+                    tableConfig: { partitionCount: size } // 借用 partitionCount 传递 size
+                });
+                showResult('ddl-result', result.success, result.data?.message || result.message);
+            } catch (e) {
+                showResult('ddl-result', false, '设置失败: ' + e.message);
+            }
+        }
+
+        // 设置 rw_mode
+        async function setRwMode() {
+            try {
+                const mode = document.getElementById('rw-mode-val').value || 'all';
+                const result = await api('/ddl/rw-mode', {
+                    sqlConnection: getSqlConnection(),
+                    tableConfig: { tableName: mode } // 借用 tableName 传递字符串参数
+                });
+                showResult('ddl-result', result.success, result.data?.message || result.message);
+            } catch (e) {
+                showResult('ddl-result', false, '设置失败: ' + e.message);
+            }
+        }
+
+        // 获取任务请求
+        function getTaskRequest() {
+            const config = getTableConfig();
+            return {
+                modelType: modelType,
+                workload: currentWorkload,
+                tableName: config.tableName,
+                columnFamily: config.columnFamily,
+                obkvConnection: {
+                    mode: currentMode,
+                    ip: document.getElementById('odp-ip').value,
+                    port: parseInt(document.getElementById('odp-port').value) || 2885,
+                    paramUrl: document.getElementById('param-url').value,
+                    sysUserName: document.getElementById('sys-user').value,
+                    sysPassword: document.getElementById('sys-password').value,
+                    fullUserName: document.getElementById('full-username').value,
+                    password: document.getElementById('obkv-password').value,
+                    database: document.getElementById('obkv-database').value
+                },
+                clientConfig: {
+                    connectionPoolSize: parseInt(document.getElementById('pool-size').value) || 100,
+                    rpcOperationTimeout: parseInt(document.getElementById('operation-timeout').value) || 10000,
+                    rpcExecuteTimeout: parseInt(document.getElementById('execute-timeout').value) || 15000,
+                    debug: document.getElementById('debug-mode').checked,
+                    nettyBufferLowWatermark: getOptionalInt('netty-low-watermark'),
+                    nettyBufferHighWatermark: getOptionalInt('netty-high-watermark')
+                },
+                workloadParams: {
+                    recordcount: parseInt(document.getElementById('record-count').value) || 100000000,
+                    operationcount: (function() { var v = document.getElementById('operation-count').value; return v === '' ? 100000000 : parseInt(v); })(),
+                    threadcount: parseInt(document.getElementById('thread-count').value) || 200,
+                    target: parseInt(document.getElementById('target').value) || 0,
+                    fieldlength: parseInt(document.getElementById('field-length').value) || 2048,
+                    maxExecutionTime: getMaxExecutionTime(),
+                    fieldcount: getOptionalInt('field-count'),
+                    zeropadding: getOptionalInt('zero-padding'),
+                    coreWorkloadInsertionRetryLimit: getOptionalInt('retry-limit'),
+                    coreWorkloadInsertionRetryInterval: getOptionalFloat('retry-interval'),
+                    runtimeBatchMaxWait: getOptionalInt('batch-wait'),
+                    batchPutSize: getOptionalInt('batch-put-size'),
+                    hbaseVersion: getOptionalInt('hbase-version'),
+                    readproportion: getOptionalFloat('read-proportion'),
+                    updateproportion: getOptionalFloat('update-proportion'),
+                    scanproportion: getOptionalFloat('scan-proportion'),
+                    insertproportion: getOptionalFloat('insert-proportion'),
+                    requestdistribution: document.querySelector('input[name="request-distribution"]:checked')?.value || null
+                },
+                segments: getOptionalInt('segment-count')
+            };
+        }
+
+        // 获取可选整数值（空则返回 null）
+        function getOptionalInt(id) {
+            const val = document.getElementById(id).value;
+            if (val === '' || val === null) return null;
+            const num = parseInt(val);
+            return isNaN(num) ? null : num;
+        }
+
+        // 获取可选浮点数值（空则返回 null）
+        function getOptionalFloat(id) {
+            const val = document.getElementById(id).value;
+            if (val === '' || val === null) return null;
+            const num = parseFloat(val);
+            return isNaN(num) ? null : num;
+        }
+
+        // 执行 Load
+        async function executeLoad() {
+            await executeTask('load');
+        }
+
+        // 执行 Run
+        async function executeRun() {
+            await executeTask('run');
+        }
+
+        // 执行分段 Load
+        async function executeSegmentLoad() {
+            await executeTask('segment-load');
+        }
+
+        // 执行任务
+        async function executeTask(operation) {
+            try {
+                // 禁用所有操作面板
+                setTaskRunning(true);
+
+                const result = await api('/task/' + operation, getTaskRequest());
+                
+                if (result.success && result.data) {
+                    currentTaskId = result.data.taskId;
+                    logs = [];
+                    updateLogDisplay();
+                    updateTaskStatus('RUNNING');
+                    document.getElementById('task-info').textContent = 
+                        `${currentWorkload.toUpperCase()} - ${operation.toUpperCase()}`;
+                    document.getElementById('task-result').innerHTML = '';
+                    
+                    // 连接 WebSocket
+                    connectWebSocket();
+                    
+                    // 轮询状态
+                    pollTaskStatus();
+                } else {
+                    showResult('task-result', false, result.message || '任务启动失败');
+                    setTaskRunning(false);
+                }
+            } catch (e) {
+                showResult('task-result', false, '任务启动失败: ' + e.message);
+                setTaskRunning(false);
+            }
+        }
+
+        // 连接 WebSocket
+        function connectWebSocket() {
+            if (ws) ws.close();
+            
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${location.host}/ws/task`);
+            
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ action: 'subscribe', taskId: currentTaskId }));
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'LOG' && msg.message) {
+                        addLog(msg.message);
+                    } else if (msg.type === 'STATUS') {
+                        updateTaskStatus(msg.status);
+                    }
+                } catch (e) {}
+            };
+        }
+
+        // 日志限流配置
+        let logUpdateTimer = null;
+        let pendingLogs = [];
+        const MAX_LOGS = 5000; // 最大保留日志数
+        const LOG_UPDATE_INTERVAL = 200; // 日志更新间隔（毫秒）
+
+        // 添加日志（带限流）
+        function addLog(message) {
+            pendingLogs.push(message);
+            
+            // 使用防抖，避免频繁渲染
+            if (logUpdateTimer) {
+                clearTimeout(logUpdateTimer);
+            }
+            
+            logUpdateTimer = setTimeout(() => {
+                // 批量添加日志
+                logs.push(...pendingLogs);
+                pendingLogs = [];
+                
+                // 限制最大日志数，避免内存溢出
+                if (logs.length > MAX_LOGS) {
+                    const removed = logs.length - MAX_LOGS;
+                    logs = logs.slice(-MAX_LOGS);
+                    console.log(`[日志限流] 已删除最旧的 ${removed} 条日志，当前保留 ${MAX_LOGS} 条`);
+                }
+                
+                updateLogDisplay();
+            }, LOG_UPDATE_INTERVAL);
+        }
+
+        // 更新日志显示（优化版）
+        let lastRenderedIndex = 0;
+        function updateLogDisplay() {
+            const container = document.getElementById('log-container');
+            
+            if (logs.length === 0) {
+                container.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div>暂无任务运行</div></div>`;
+                lastRenderedIndex = 0;
+                return;
+            }
+            
+            // 如果日志数量超过阈值，使用完全重渲染（避免 DOM 节点过多）
+            if (logs.length - lastRenderedIndex > 1000 || lastRenderedIndex > logs.length) {
+                container.innerHTML = logs.map((log, i) => {
+                    let cls = '';
+                    if (log.includes('Error') || log.includes('Exception')) cls = 'log-error';
+                    else if (log.includes('[OVERALL]')) cls = 'log-success';
+                    else if (log.includes('[READ]') || log.includes('[UPDATE]') || log.includes('[INSERT]')) cls = 'log-metric';
+                    return `<div class="log-line ${cls}"><span class="log-num">${i + 1}</span><span class="log-content">${escapeHtml(log)}</span></div>`;
+                }).join('');
+                lastRenderedIndex = logs.length;
+            } else {
+                // 增量渲染：只添加新日志
+                const fragment = document.createDocumentFragment();
+                for (let i = lastRenderedIndex; i < logs.length; i++) {
+                    const log = logs[i];
+                    const div = document.createElement('div');
+                    div.className = 'log-line';
+                    
+                    if (log.includes('Error') || log.includes('Exception')) div.classList.add('log-error');
+                    else if (log.includes('[OVERALL]')) div.classList.add('log-success');
+                    else if (log.includes('[READ]') || log.includes('[UPDATE]') || log.includes('[INSERT]')) div.classList.add('log-metric');
+                    
+                    div.innerHTML = `<span class="log-num">${i + 1}</span><span class="log-content">${escapeHtml(log)}</span>`;
+                    fragment.appendChild(div);
+                }
+                container.appendChild(fragment);
+                lastRenderedIndex = logs.length;
+            }
+            
+            document.getElementById('log-count').textContent = logs.length + ' 行';
+            
+            if (document.getElementById('auto-scroll').checked) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        // 转义 HTML
+        function escapeHtml(text) {
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // 更新任务状态
+        function updateTaskStatus(status) {
+            const badge = document.getElementById('task-status');
+            badge.style.display = 'inline-block';
+            badge.className = 'status-badge';
+            
+            switch (status) {
+                case 'RUNNING':
+                    badge.className += ' status-running';
+                    badge.textContent = '运行中';
+                    break;
+                case 'COMPLETED':
+                    badge.className += ' status-completed';
+                    badge.textContent = '已完成';
+                    taskFinished();
+                    break;
+                case 'FAILED':
+                    badge.className += ' status-error';
+                    badge.textContent = '失败';
+                    taskFinished();
+                    break;
+                case 'STOPPED':
+                    badge.textContent = '已停止';
+                    taskFinished();
+                    break;
+            }
+        }
+
+        // 任务完成
+        function taskFinished() {
+            setTaskRunning(false);
+            if (ws) ws.close();
+        }
+
+        // 设置任务运行状态（禁用/启用所有操作面板）
+        function setTaskRunning(running) {
+            // 控制 Load/Run/Stop 按钮
+            document.getElementById('btn-load').disabled = running;
+            document.getElementById('btn-run').disabled = running;
+            document.getElementById('btn-segment-load').disabled = running;
+            document.getElementById('btn-stop').style.display = running ? 'inline-flex' : 'none';
+            document.getElementById('btn-clear-results').disabled = running;
+
+            // 禁用所有输入框和按钮（运行时）
+            const inputs = document.querySelectorAll('.form-input, .form-select');
+            const buttons = document.querySelectorAll('.btn:not(#btn-stop):not(#btn-load):not(#btn-run):not(#btn-clear-results)');
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]:not(#auto-scroll)');
+            const workloadBtns = document.querySelectorAll('.workload-btn');
+            const modeBtns = document.querySelectorAll('.mode-btn');
+
+            inputs.forEach(el => el.disabled = running);
+            buttons.forEach(el => el.disabled = running);
+            checkboxes.forEach(el => el.disabled = running);
+            workloadBtns.forEach(el => {
+                el.style.pointerEvents = running ? 'none' : 'auto';
+                el.style.opacity = running ? '0.5' : '1';
+            });
+            modeBtns.forEach(el => {
+                el.style.pointerEvents = running ? 'none' : 'auto';
+                el.style.opacity = running ? '0.5' : '1';
+            });
+        }
+
+        // 轮询任务状态
+        async function pollTaskStatus() {
+            if (!currentTaskId) return;
+            
+            try {
+                const response = await fetch('/api/task/status/' + currentTaskId);
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    updateTaskStatus(result.data.status);
+                    
+                    // 更新日志
+                    if (result.data.logs && result.data.logs.length > logs.length) {
+                        logs = result.data.logs;
+                        lastRenderedIndex = 0; // 重置渲染索引
+                        updateLogDisplay();
+                    }
+                    
+                    // 显示结果
+                    if (result.data.result && result.data.status === 'COMPLETED') {
+                        document.getElementById('task-result').innerHTML = 
+                            `<div class="result-box result-success" style="white-space: pre-wrap; font-family: monospace; font-size: 12px;">${escapeHtml(result.data.result)}</div>`;
+                    }
+                    
+                    // 继续轮询
+                    if (result.data.status === 'RUNNING' || result.data.status === 'PENDING') {
+                        setTimeout(pollTaskStatus, 1000);
+                    }
+                }
+            } catch (e) {
+                setTimeout(pollTaskStatus, 2000);
+            }
+        }
+
+        // 停止任务
+        async function stopTask() {
+            if (!currentTaskId) return;
+            if (!confirm('确定要停止任务吗？')) return;
+            
+            try {
+                addLog('[系统] 正在停止任务...');
+                const response = await fetch('/api/task/stop/' + currentTaskId, { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    addLog('[系统] 任务已停止');
+                    updateTaskStatus('STOPPED');
+                    taskFinished();
+                } else {
+                    addLog('[系统] 停止失败: ' + (result.message || '未知错误'));
+                }
+            } catch (e) {
+                console.error('Stop task failed:', e);
+                addLog('[系统] 停止请求失败: ' + e.message);
+            }
+        }
+
+        // 清理结果文件
+        async function clearResults() {
+            // 二次确认
+            if (!confirm('确定要清理所有结果文件吗？此操作不可恢复！')) return;
+            if (!confirm('再次确认：将删除 result 目录下所有日志文件，确定继续？')) return;
+            
+            try {
+                const response = await fetch('/api/task/results/clear', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    alert('✓ 已清理 ' + result.data + ' 个结果文件');
+                } else {
+                    alert('✗ 清理失败: ' + result.message);
+                }
+            } catch (e) {
+                alert('✗ 清理失败: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+

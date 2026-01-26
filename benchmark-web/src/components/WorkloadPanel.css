@@ -1,0 +1,116 @@
+.workload-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.workload-selector {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--spacing-sm);
+}
+
+.workload-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.workload-btn:hover {
+  border-color: var(--color-text-tertiary);
+  color: var(--color-text-primary);
+  transform: translateY(-2px);
+}
+
+.workload-btn.active {
+  border-color: var(--color-accent-primary);
+  background: rgba(88, 166, 255, 0.1);
+  color: var(--color-accent-primary);
+}
+
+.workload-name {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.workload-desc {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.workload-info {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+}
+
+.info-label {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.info-value {
+  color: var(--color-accent-cyan);
+}
+
+.workload-params {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.params-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.params-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.workload-actions {
+  display: flex;
+  gap: var(--spacing-md);
+  justify-content: center;
+  padding-top: var(--spacing-md);
+}
+
+.workload-actions .btn {
+  min-width: 160px;
+}
+
+.workload-error {
+  padding: var(--spacing-md);
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid var(--color-border-error);
+  border-radius: var(--radius-md);
+  color: var(--color-accent-error);
+  font-size: 14px;
+  text-align: center;
+  animation: slideIn 0.3s ease;
+}
+
+@media (max-width: 768px) {
+  .workload-selector {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+

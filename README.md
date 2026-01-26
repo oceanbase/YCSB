@@ -17,48 +17,37 @@ LICENSE file.
 -->
 
 
-# YCSB for OBKV
-本 YCSB 发行版包含两个 OBKV 模型绑定：
+# YCSB for OBKV (HBase & Table)
 
-## OBKV-HBase 绑定
+本 YCSB 发行版包含两个 OBKV 模型绑定（HBase & Table），并提供了一个统一的 Web 压测控制台和分段导入工具。
 
-**obkv-hbase** 绑定用于测试 OceanBase HBase 兼容模式的性能。
-
-**功能特性：**
-- 支持 ODP 模式和直连模式
-- Range 分区配合 Key 子分区
-- 多版本模式支持
-- 批量操作（batchPut、batchRead）
-- 自动建表脚本
+## 统一压测控制台
 
 **快速开始：**
 ```sh
-cd obkv-hbase
+# 1. 编译项目 (包含 core, obkv-hbase, obkv-table, benchmark-server)
 ./build.sh
-./create_table.sh 1 40
-./run_fast_test.sh load
-./run_fast_test.sh read
-```
 
+# 2. 启动控制台 (默认端口 8081)
+./start.sh
+```
+访问 `http://localhost:8081` 即可使用 Web 界面进行压测管理、DDL 操作和日志查看。
+
+## 核心工具脚本 (根目录)
+
+- `build.sh`: 一键编译所有模块。
+- `start.sh` / `stop.sh`: 启动/停止 Web 控制台。
+- `create_table.sh`: 命令行 DDL 工具。
+- `segment_load.sh`: 分段并行导入数据工具。
+- `package.sh`: 生成离线部署包。
+
+---
+
+## OBKV-HBase 绑定
+**obkv-hbase** 绑定用于测试 OceanBase HBase 兼容模式的性能。
 详细文档请参考 [obkv-hbase/README.md](obkv-hbase/README.md)。
 
 ## OBKV-Table 绑定
-
 **obkv-table** 绑定用于测试 OceanBase Table 模型的性能。
-
-**功能特性：**
-- 支持 Range 分区和 Range+Key 分区
-- 灵活的表创建配置，支持多种分区策略
-- 支持多种工作负载类型
-
-**快速开始：**
-```sh
-cd obkv-table
-./build.sh
-./create_table.sh --mode range 4 1000
-./run_fast_test.sh load
-./run_fast_test.sh read
-```
-
 详细文档请参考 [obkv-table/README.md](obkv-table/README.md)。
 

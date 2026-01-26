@@ -1,0 +1,76 @@
+.obkv-connection-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.mode-selector {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--color-bg-secondary);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  transition: all var(--transition-fast);
+}
+
+.mode-btn:hover {
+  border-color: var(--color-text-tertiary);
+  color: var(--color-text-primary);
+}
+
+.mode-btn.active {
+  border-color: var(--color-accent-primary);
+  background: rgba(88, 166, 255, 0.1);
+  color: var(--color-accent-primary);
+}
+
+.mode-icon {
+  font-size: 18px;
+}
+
+.mode-label {
+  font-size: 14px;
+}
+
+.connection-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.mode-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.common-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.fields-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+

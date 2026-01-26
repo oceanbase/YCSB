@@ -17,8 +17,21 @@ public class RunMain {
         try {
             List<String> list = new ArrayList<>();
             list.add("-s");
-            list.add("-db");
-            list.add("com.oceanbase.obkv.ycsb.OBHBaseClient");
+            
+            // Check if -db is already provided in args
+            boolean dbProvided = false;
+            for (int i = 0; i < args.length; i++) {
+                if (args[i].equals("-db")) {
+                    dbProvided = true;
+                    break;
+                }
+            }
+            
+            if (!dbProvided) {
+                list.add("-db");
+                list.add("com.oceanbase.obkv.ycsb.OBHBaseClient");
+            }
+            
             list.addAll(Arrays.asList(args));
             String[] arr = list.toArray(new String[0]);
             Method method = Client.class.getMethod("main", String[].class);
@@ -26,6 +39,5 @@ public class RunMain {
         } catch (Exception e) {
             e.printStackTrace();
         }
-
     }
 }

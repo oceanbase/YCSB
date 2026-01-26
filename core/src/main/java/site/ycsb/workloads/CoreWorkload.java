@@ -364,7 +364,7 @@ public class CoreWorkload extends Workload {
    * On average, how long to wait between the retries, in seconds.
    */
   public static final String INSERTION_RETRY_INTERVAL = "core_workload_insertion_retry_interval";
-  public static final String INSERTION_RETRY_INTERVAL_DEFAULT = "3";
+  public static final String INSERTION_RETRY_INTERVAL_DEFAULT = "3.0";
 
   /**
    * Field name prefix.
@@ -401,7 +401,7 @@ public class CoreWorkload extends Workload {
   protected long insertcount;
   protected int zeropadding;
   protected int insertionRetryLimit;
-  protected int insertionRetryInterval;
+  protected double insertionRetryInterval;
   protected int batchPutSize;
   protected int batchReadSize;
 
@@ -584,7 +584,7 @@ public class CoreWorkload extends Workload {
 
     insertionRetryLimit = Integer.parseInt(p.getProperty(
         INSERTION_RETRY_LIMIT, INSERTION_RETRY_LIMIT_DEFAULT));
-    insertionRetryInterval = Integer.parseInt(p.getProperty(
+    insertionRetryInterval = Double.parseDouble(p.getProperty(
         INSERTION_RETRY_INTERVAL, INSERTION_RETRY_INTERVAL_DEFAULT));
     batchPutSize = Integer.parseInt(p.getProperty(BATCH_PUT_SIZE_PER_OP, BATCH_PUT_SIZE_PER_OP_DEFAULT));
     batchReadSize = Integer.parseInt(p.getProperty(BATCH_READ_SIZE_PER_OP, BATCH_READ_SIZE_PER_OP_DEFAULT));
