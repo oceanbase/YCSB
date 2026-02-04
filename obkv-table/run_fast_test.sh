@@ -14,7 +14,7 @@ if [ ! -d "$BUILD_DIR" ]; then
 fi
 
 # 检查jar包是否存在
-JAR_FILE="$BUILD_DIR/obkv-table-0.18.0-SNAPSHOT-jar-with-dependencies.jar"
+JAR_FILE="$BUILD_DIR/obkv-table-1.0-SNAPSHOT-jar-with-dependencies.jar"
 if [ ! -f "$JAR_FILE" ]; then
     echo "错误：jar包不存在：$JAR_FILE"
     echo "请先运行 ./build.sh 编译打包项目"
