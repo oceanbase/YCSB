@@ -293,7 +293,7 @@ public class CoreWorkload extends Workload {
   /**
    * The default zero padding value. Matches integer sort order
    */
-  public static final String ZERO_PADDING_PROPERTY_DEFAULT = "12";
+  public static final String ZERO_PADDING_PROPERTY_DEFAULT = "20";
 
 
   /**
@@ -424,7 +424,7 @@ public class CoreWorkload extends Workload {
 
   public String buildKeyName(long keynum) {
     if (!orderedinserts) {
-      keynum = Utils.hash(keynum) % recordcount;
+      keynum = Utils.hash(keynum);
     }
     String value = Long.toString(keynum);
     int fill = zeropadding - value.length();

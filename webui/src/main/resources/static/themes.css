@@ -1,0 +1,59 @@
+/* Light theme (apply when body.theme-light or html[data-theme="light"]) */
+html[data-theme="light"],
+body.theme-light {
+  --bg-page: #f6f8fa;
+  --bg-panel: #ffffff;
+  --bg-input: #f6f8fa;
+  --border: #d0d7de;
+  --border-subtle: #eaeef2;
+  --text: #1f2328;
+  --text-muted: #656d76;
+  --accent: #0969da;
+  --accent-hover: #0550ae;
+  --success: #1a7f37;
+  --danger: #cf222e;
+  --warn: #9a6700;
+  --nav-bg: #ffffff;
+  --nav-border: #d0d7de;
+  --nav-btn-bg: #f6f8fa;
+  --nav-btn-active-bg: #0969da;
+  --nav-btn-active-color: #fff;
+  --dot-running: #1a7f37;
+  --dot-completed: #0969da;
+  --dot-failed: #cf222e;
+  --dot-stopped: #656d76;
+  --resize-handle: #d0d7de;
+  --resize-handle-hover: #0969da;
+  --scrollbar-thumb: #afb8c1;
+  --scrollbar-thumb-hover: #8c959f;
+}
+
+/* Dark theme (default) */
+html,
+html[data-theme="dark"] {
+  --bg-page: #0f1117;
+  --bg-panel: #161b22;
+  --bg-input: #0d1117;
+  --border: #30363d;
+  --border-subtle: #21262d;
+  --text: #d0d4dc;
+  --text-muted: #8b949e;
+  --accent: #58a6ff;
+  --accent-hover: #388bfd;
+  --success: #3fb950;
+  --danger: #f85149;
+  --warn: #d29922;
+  --nav-bg: #161b22;
+  --nav-border: #30363d;
+  --nav-btn-bg: #0d1117;
+  --nav-btn-active-bg: #1f6feb;
+  --nav-btn-active-color: #fff;
+  --dot-running: #3fb950;
+  --dot-completed: #58a6ff;
+  --dot-failed: #f85149;
+  --dot-stopped: #8b949e;
+  --resize-handle: #21262d;
+  --resize-handle-hover: #58a6ff;
+  --scrollbar-thumb: #30363d;
+  --scrollbar-thumb-hover: #484f58;
+}

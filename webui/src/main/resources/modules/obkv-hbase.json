@@ -1,0 +1,169 @@
+{
+  "moduleId": "obkv-hbase",
+  "displayName": "OBKV HBase",
+  "jarPathConfig": "webui.hbase.jar.path",
+  "workdirConfig": "webui.hbase.workdir",
+  "commandFlags": ["-s"],
+  "loadFlag": "-load",
+
+  "connectionModes": {
+    "odp": {
+      "fields": [
+        {"key": "hbase.oceanbase.odpAddr", "label": "ODP 地址", "type": "text", "required": true},
+        {"key": "hbase.oceanbase.odpPort", "label": "ODP 端口", "type": "number", "required": true, "defaultValue": "2883"}
+      ]
+    },
+    "direct": {
+      "fields": [
+        {"key": "hbase.oceanbase.paramURL",    "label": "Config url",        "type": "text",     "required": true},
+        {"key": "hbase.oceanbase.sysUserName", "label": "系统租户用户名",   "type": "text",     "required": true},
+        {"key": "hbase.oceanbase.sysPassword", "label": "系统密码",  "type": "password", "required": true}
+      ]
+    },
+    "common": {
+      "fields": [
+        {"key": "hbase.oceanbase.odpMode",    "label": "ODP 模式",  "type": "hidden",   "defaultValue": "false"},
+        {"key": "hbase.oceanbase.fullUserName","label": "测试租户用户名", "type": "text",     "required": true},
+        {"key": "hbase.oceanbase.password",   "label": "密码",      "type": "password", "required": true},
+        {"key": "hbase.oceanbase.database",   "label": "数据库",    "type": "text",     "required": true, "defaultValue": "test"},
+        {"key": "hbase.oceanbase.table",      "label": "表名",      "type": "text",     "required": true, "defaultValue": "ycsb_test"},
+        {"key": "hbase.oceanbase.columnFamily","label": "列族",     "type": "text",     "required": true, "defaultValue": "cf"}
+      ]
+    }
+  },
+
+  "tableModes": [
+    {
+      "id": "default",
+      "label": "默认模式",
+      "fields": []
+    },
+    {
+      "id": "prefix",
+      "label": "Prefix 模式",
+      "fields": [
+        {"key": "obkv.prefixCount", "label": "Prefix 数量", "type": "number", "required": true}
+      ],
+      "fixedValues": {"insertorder": "ordered"},
+      "validation": [
+        {"rule": "insertorder_must_be_ordered", "message": "prefix 模式强制要求 insertorder=ordered"}
+      ]
+    }
+  ],
+
+  "partitionTypes": [
+    {
+      "id": "single",
+      "label": "一级分区",
+      "fields": []
+    },
+    {
+      "id": "double",
+      "label": "二级分区",
+      "fields": [
+        {"key": "obkv.rangePartitionStartTs",    "label": "起始时间戳(ms)", "type": "number", "required": true},
+        {"key": "obkv.rangePartitionDurationMs", "label": "分区时长(ms)",   "type": "number", "required": true},
+        {"key": "obkv.rangePartitionCount",      "label": "Range 分区数",   "type": "number", "required": true}
+      ]
+    }
+  ],
+
+  "testTypes": [
+    {
+      "id": "load",
+      "label": "load",
+      "isLoad": true,
+      "proportions": {"insertproportion": 1}
+    },
+    {
+      "id": "put",
+      "label": "put",
+      "isLoad": false,
+      "proportions": {"insertproportion": 1}
+    },
+    {
+      "id": "read",
+      "label": "read",
+      "isLoad": false,
+      "proportions": {"readproportion": 1}
+    },
+    {
+      "id": "scan",
+      "label": "scan",
+      "isLoad": false,
+      "proportions": {"scanproportion": 1},
+      "extraFields": [
+        {"key": "maxscanlength",           "label": "最大扫描行数",    "type": "number",  "defaultValue": "1000"},
+        {"key": "scanlengthdistribution",  "label": "扫描长度分布",    "type": "text",    "defaultValue": "uniform"},
+        {"key": "obkv.scan.usePageFilter", "label": "启用 PageFilter","type": "boolean", "defaultValue": "false"},
+        {"key": "obkv.scan.pageFilterSize","label": "PageFilter 大小","type": "number",  "defaultValue": "100"}
+      ]
+    },
+    {
+      "id": "batch_put",
+      "label": "batch_put",
+      "isLoad": false,
+      "proportions": {"insertproportion": 1},
+      "extraFields": [
+        {"key": "batchput.size.per.op", "label": "批量大小", "type": "number", "defaultValue": "10"}
+      ]
+    },
+    {
+      "id": "batch_read",
+      "label": "batch_read",
+      "isLoad": false,
+      "proportions": {"readproportion": 1},
+      "extraFields": [
+        {"key": "batchread.size.per.op", "label": "批量大小", "type": "number", "defaultValue": "10"}
+      ]
+    }
+  ],
+
+  "knownParams": [
+    "hbase.oceanbase.odpMode",
+    "hbase.oceanbase.odpAddr",
+    "hbase.oceanbase.odpPort",
+    "hbase.oceanbase.paramURL",
+    "hbase.oceanbase.sysUserName",
+    "hbase.oceanbase.sysPassword",
+    "hbase.oceanbase.fullUserName",
+    "hbase.oceanbase.password",
+    "hbase.oceanbase.database",
+    "hbase.oceanbase.table",
+    "hbase.oceanbase.columnFamily",
+    "obkv.testMode",
+    "obkv.prefixCount",
+    "obkv.maxKey",
+    "obkv.rangePartitionStartTs",
+    "obkv.rangePartitionDurationMs",
+    "obkv.rangePartitionCount",
+    "obkv.scan.usePageFilter",
+    "obkv.scan.pageFilterSize",
+    "obkv.enableTimeRangeTestMode",
+    "obkv.keyCount",
+    "obkv.debug",
+    "insertorder",
+    "maxscanlength",
+    "scanlengthdistribution",
+    "batchput.size.per.op",
+    "batchread.size.per.op",
+    "server.connection.pool.size",
+    "rpc.operation.timeout",
+    "rpc.execute.timeout",
+    "workload",
+    "recordcount",
+    "operationcount",
+    "threadcount",
+    "fieldcount",
+    "fieldlength",
+    "requestdistribution",
+    "readproportion",
+    "insertproportion",
+    "scanproportion",
+    "updateproportion",
+    "readmodifywriteproportion",
+    "batchputproportion",
+    "batchreadproportion",
+    "measurementtype"
+  ]
+}

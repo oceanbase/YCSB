@@ -43,6 +43,7 @@ LICENSE file.
       <module>core</module>
       <module>obkv-table</module>
       <module>obkv-hbase</module>
+      <module>webui</module>
   </modules>
 
   <dependencyManagement>
