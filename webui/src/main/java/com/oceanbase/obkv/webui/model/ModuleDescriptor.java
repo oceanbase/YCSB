@@ -1,6 +1,7 @@
 package com.oceanbase.obkv.webui.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Map;
 
@@ -100,6 +101,7 @@ public class ModuleDescriptor {
     public static class TestType {
         private String id;
         private String label;
+        @JsonProperty("isLoad")
         private boolean isLoad;
         private Map<String, Object> proportions;
         private List<FieldDef> extraFields;

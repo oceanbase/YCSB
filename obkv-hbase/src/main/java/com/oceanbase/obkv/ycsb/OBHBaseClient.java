@@ -64,7 +64,7 @@ public class OBHBaseClient extends DB {
     private int prefixCount = 1000;  // 前缀ID的总数
     private boolean usePageFilter = false;  // 是否使用PageFilter进行scan查询
     private Integer pageFilterSize = null;  // PageFilter的大小，如果为null则使用recordcount
-
+    private boolean isDoublePartition = false;  // 是否为二级分区表
     @Override
     public void cleanup() throws DBException {
         if (connection != null) {
@@ -89,7 +89,7 @@ public class OBHBaseClient extends DB {
         
         // 读取测试模式
         testMode = getProperties().getProperty(PROP_TEST_MODE, "default");
-        if (!testMode.equals("default") && !testMode.equals("prefix")) {
+        if (!testMode.equalsIgnoreCase("default") && !testMode.equalsIgnoreCase("prefix")) {
             throw new DBException("Invalid testMode: " + testMode + ", must be 'default' or 'prefix'");
         }
         
@@ -119,7 +119,7 @@ public class OBHBaseClient extends DB {
         System.out.println("columnFamily: " + columnFamily + ", table: " + tableName + ", debug: " + debug + ", isObkv: " + isObkv + ", testMode: " + testMode);
         
         // 前缀模式初始化
-        if (testMode.equals("prefix")) {
+        if (testMode.equalsIgnoreCase("prefix")) {
             initPrefixMode();
         }
         
@@ -253,9 +253,12 @@ public class OBHBaseClient extends DB {
         }
         
         // 判断是否为二级分区表（通过检查是否有range分区配置）
-        boolean isDoublePartition = false;
+        isDoublePartition = false;
         String rangePartitionCountStr = getProperties().getProperty(PROP_KEY_PARTITION_COUNT);
         if (rangePartitionCountStr != null && !rangePartitionCountStr.trim().isEmpty()) {
+            if (!testMode.equalsIgnoreCase("prefix")) {
+                throw new DBException("二级分区表必须使用 Prefix 模式（obkv.testMode=prefix），当前 testMode=" + testMode);
+            }
             isDoublePartition = true;
             initPartitionConfig();
         }
@@ -395,7 +398,7 @@ public class OBHBaseClient extends DB {
      * @return 处理后的key
      */
     private String processKey(String ycsbKey) {
-        if (testMode.equals("prefix")) {
+        if (testMode.equalsIgnoreCase("prefix")) {
             return generatePrefixKey(ycsbKey);
         } else {
             return processKeyForDefaultMode(ycsbKey);
@@ -481,16 +484,13 @@ public class OBHBaseClient extends DB {
     }
     
     /**
-     * 从prefix key中提取prefixId
-     * @param prefixKey prefixId_subId格式的key
+     * 计算对应的key前缀
+     * @param key 
      * @return prefixId
      */
-    private String extractPrefixId(String prefixKey) {
-        int underscoreIndex = prefixKey.indexOf('_');
-        if (underscoreIndex > 0) {
-            return prefixKey.substring(0, underscoreIndex) + "_";
-        }
-        return null;
+    private String extractPrefixId(String key) {
+        long keyValue = Long.parseLong(key.trim());
+        return String.valueOf(keyValue / prefixCount);
     }
     
     /**
@@ -523,6 +523,12 @@ public class OBHBaseClient extends DB {
                 }
             }
             r = connection.getTable(TableName.valueOf(tableName)).get(g);
+            if (r == null || r.isEmpty()) {
+                if (debug) {
+                    System.out.println("Result is empty, key=" + processedKey);
+                }
+                return Status.NOT_FOUND;
+            }
         } catch (Exception e) {
             IOException ioException = (e instanceof IOException) ? (IOException) e : new IOException("Error in read", e);
             System.err.println("Error doing get: " + ioException);
@@ -558,12 +564,12 @@ public class OBHBaseClient extends DB {
             scan.setCaching(recordcount);
             scan.setMaxVersions(1);
             
-            if (testMode.equals("prefix")) {
+            if (testMode.equalsIgnoreCase("prefix")) {
                 // 前缀模式：使用setRowPrefixFilter
                 String prefixId = extractPrefixId(startkey);
                 byte[] prefixBytes = Bytes.toBytes(prefixId + "_");
                 scan.setRowPrefixFilter(prefixBytes);
-                
+
                 if (debug) {
                     System.out.println("Prefix scan: prefixId=" + prefixId);
                 }
@@ -620,7 +626,7 @@ public class OBHBaseClient extends DB {
 
                 // add rowResult to result vector
                 result.add(rowResult);
-                numResults++;
+                (numResults)++;
                 if (debug) {
                     for (Map.Entry<String, ByteIterator> entry : rowResult.entrySet()) {
                         System.out.println("Result for field: " + entry.getKey() + " is: " + entry.getValue());
@@ -632,6 +638,12 @@ public class OBHBaseClient extends DB {
                 if (numResults >= recordcount) {// if hit recordcount, bail out
                     break;
                 }
+            }
+            if (numResults == 0) {
+                if (debug) {
+                    System.out.println("No results found");
+                }
+                return Status.NOT_FOUND;
             }
         } catch (Exception e) {
             IOException ioException = (e instanceof IOException) ? (IOException) e : new IOException("Error in scan", e);
@@ -669,9 +681,7 @@ public class OBHBaseClient extends DB {
                                    + " to put request");
             }
             
-            // 判断是否需要指定时间戳（仅二级分区表的前缀模式）
-            boolean needTimestamp = testMode.equals("prefix") && partitionCount > 0 && partitionDurationMs > 0;
-            if (needTimestamp) {
+            if (isDoublePartition) {
                 long timestamp = generateTimestampForDoublePartition(key);
                 p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), timestamp, entry.getValue().toArray());
             } else {

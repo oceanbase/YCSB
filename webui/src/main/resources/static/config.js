@@ -46,7 +46,6 @@ const Config = (() => {
     renderWorkloadFields();
     const tt = moduleDesc.testTypes && moduleDesc.testTypes.find(t => t.id === currentTestType);
     if (tt) updateProportionFields(tt);
-    updateWorkloadPreview();
     await loadSavedConfigs();
   }
 
@@ -91,6 +90,7 @@ const Config = (() => {
         o.value = opt; o.textContent = opt;
         input.appendChild(o);
       });
+      if (field.defaultValue != null) input.value = field.defaultValue;
     } else {
       input = document.createElement('input');
       input.type = field.type === 'password' ? 'password' : (field.type === 'number' ? 'number' : 'text');
@@ -103,6 +103,19 @@ const Config = (() => {
 
     container.appendChild(label);
     container.appendChild(input);
+
+    if (field.key === 'obkv.insertType') {
+      const hint = document.createElement('div');
+      hint.className = 'field-hint';
+      hint.style.cssText = 'grid-column:1/-1;color:#d29922;font-size:12px;margin:-4px 0 4px 0';
+      hint.textContent = "使用 put 类型需要设置租户变量：set global binlog_row_image='MINIMAL'";
+      hint.style.display = (input.value === 'put') ? '' : 'none';
+      container.appendChild(hint);
+      input.addEventListener('change', () => {
+        hint.style.display = (input.value === 'put') ? '' : 'none';
+        if (formChangeCallback) formChangeCallback();
+      });
+    }
   }
 
   // ---- Table mode fields ----
@@ -128,6 +141,16 @@ const Config = (() => {
       btn.textContent = tm.label;
       btn.dataset.modeId = tm.id;
       btn.addEventListener('click', () => {
+        if (btn.classList.contains('mode-locked')) {
+          const hint = document.getElementById('tableModeHint');
+          if (hint) {
+            hint.textContent = '二级分区表必须使用 Prefix 模式';
+            hint.style.display = 'block';
+            clearTimeout(hint._timer);
+            hint._timer = setTimeout(() => { hint.style.display = 'none'; }, 3000);
+          }
+          return;
+        }
         document.querySelectorAll('#tableModeToggle .toggle-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         renderTableModeExtraFields(tm);
@@ -136,6 +159,11 @@ const Config = (() => {
       modeToggle.appendChild(btn);
     });
     modeRow.appendChild(modeToggle);
+    // hint element for lock error
+    const modeHint = document.createElement('div');
+    modeHint.id = 'tableModeHint';
+    modeHint.style.cssText = 'display:none;color:#f85149;font-size:12px;margin-top:4px;grid-column:1/-1';
+    container.appendChild(modeHint);
     container.appendChild(modeRow);
 
     const extraDiv = document.createElement('div');
@@ -166,6 +194,22 @@ const Config = (() => {
           document.querySelectorAll('#partitionTypeGroup .toggle-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           renderPartitionFields(pt);
+          // 二级分区强制使用 prefix 模式，一级分区恢复所有模式可选
+          const isDouble = pt.id === 'double';
+          document.querySelectorAll('#tableModeToggle .toggle-btn').forEach(b => {
+            const isDefault = b.dataset.modeId === 'default';
+            b.classList.toggle('mode-locked', isDouble && isDefault);
+            if (isDouble && isDefault && b.classList.contains('active')) {
+              // 被锁定的按钮当前是激活态，切换到 prefix
+              const prefixBtn = document.querySelector('#tableModeToggle .toggle-btn[data-mode-id="prefix"]');
+              if (prefixBtn) prefixBtn.click();
+            }
+          });
+          // 切回一级分区时隐藏提示
+          if (!isDouble) {
+            const hint = document.getElementById('tableModeHint');
+            if (hint) hint.style.display = 'none';
+          }
           if (formChangeCallback) formChangeCallback();
         });
         ptToggle.appendChild(btn);
@@ -463,7 +507,12 @@ const Config = (() => {
     }
 
     if (moduleDesc) {
-      const connModeFromProps = (props['hbase.oceanbase.odpMode'] === 'true') ? 'odp' : 'direct';
+      // Fix 1: find odpMode key dynamically from module descriptor instead of hardcoding obkv-hbase key
+      const hiddenField = moduleDesc.connectionModes && moduleDesc.connectionModes.common
+        ? moduleDesc.connectionModes.common.fields.find(f => f.type === 'hidden')
+        : null;
+      const odpModeKey = hiddenField ? hiddenField.key : null;
+      const connModeFromProps = odpModeKey && props[odpModeKey] === 'true' ? 'odp' : 'direct';
       if (connModeFromProps !== connMode) {
         connMode = connModeFromProps;
         document.querySelectorAll('#connModeToggle .toggle-btn').forEach(b => {
@@ -472,10 +521,26 @@ const Config = (() => {
         renderConnFields();
       }
 
-      const tableModeId = (props['insertorder'] === 'ordered') ? 'prefix' : 'default';
-      const tableModeBtn = document.querySelector(`#tableModeToggle .toggle-btn[data-mode-id="${tableModeId}"]`);
-      if (tableModeBtn && !tableModeBtn.classList.contains('active')) {
-        tableModeBtn.click();
+      // Fix 2: detect table mode generically via fixedValues or unique fields in module descriptor
+      let matchedModeId = null;
+      for (const tm of moduleDesc.tableModes || []) {
+        if (tm.fixedValues && Object.keys(tm.fixedValues).length > 0) {
+          if (Object.entries(tm.fixedValues).every(([k, v]) => props[k] === String(v))) {
+            matchedModeId = tm.id;
+            break;
+          }
+        } else if (tm.fields && tm.fields.length > 0) {
+          if (tm.fields.some(f => props[f.key] !== undefined)) {
+            matchedModeId = tm.id;
+            break;
+          }
+        }
+      }
+      if (matchedModeId) {
+        const tableModeBtn = document.querySelector(`#tableModeToggle .toggle-btn[data-mode-id="${matchedModeId}"]`);
+        if (tableModeBtn && !tableModeBtn.classList.contains('active')) {
+          tableModeBtn.click();
+        }
       }
 
       if (moduleDesc.partitionTypes && moduleDesc.partitionTypes.length > 0) {
@@ -503,7 +568,19 @@ const Config = (() => {
       }
     }
 
-    const knownKeys = new Set(moduleDesc ? (moduleDesc.knownParams || []) : []);
+    // Fix 3: replace broad knownParams exclusion with a minimal skip-set so that params
+    // which have no form field but were added as custom params can be correctly restored.
+    // Only exclude: the internal workload class key, fixedValues keys (handled by tableMode
+    // button clicks), and hidden connection-mode fields (already applied above).
+    const skipAsCustom = new Set(['workload']);
+    if (moduleDesc) {
+      (moduleDesc.tableModes || []).forEach(tm => {
+        if (tm.fixedValues) Object.keys(tm.fixedValues).forEach(k => skipAsCustom.add(k));
+      });
+      const commonFields = moduleDesc.connectionModes && moduleDesc.connectionModes.common
+        ? moduleDesc.connectionModes.common.fields : [];
+      commonFields.filter(f => f.type === 'hidden').forEach(f => skipAsCustom.add(f.key));
+    }
     const customParams = {};
 
     Object.entries(props).forEach(([k, v]) => {
@@ -511,7 +588,7 @@ const Config = (() => {
       if (el) {
         if (el.type === 'checkbox') el.checked = v === 'true';
         else el.value = v;
-      } else if (!knownKeys.has(k)) {
+      } else if (!skipAsCustom.has(k)) {
         customParams[k] = v;
       }
     });

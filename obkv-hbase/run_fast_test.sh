@@ -21,9 +21,12 @@ if [ ! -f "$JAR_FILE" ]; then
     exit 1
 fi
 
+DB_CLASS="com.oceanbase.obkv.ycsb.OBHBaseClient"
+
 echo "=========================================="
 echo "YCSB OBKV-HBASE 运行脚本"
 echo "Jar包位置：$JAR_FILE"
+echo "DB类：$DB_CLASS"
 echo "=========================================="
 
 print_usage() {
@@ -48,10 +51,6 @@ print_usage() {
 # 解析全局选项（必须放在 OPERATION 之前）
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --table-mode)
-            TABLE_MODE="${2:-}"
-            shift 2
-            ;;
         -h|--help)
             print_usage
             exit 0
@@ -92,7 +91,7 @@ case "$OPERATION" in
         echo "=========================================="
         echo "执行写入测试..."
         echo "=========================================="
-        java -jar "$JAR_FILE" -P "$WORKLOAD_FILE"
+        java -jar "$JAR_FILE" -db "$DB_CLASS" -P "$WORKLOAD_FILE"
         ;;
     "read")
         WORKLOAD_FILE="workloads/workload_read"
@@ -103,7 +102,7 @@ case "$OPERATION" in
         echo "=========================================="
         echo "执行读取测试..."
         echo "=========================================="
-        java -jar "$JAR_FILE" -P "$WORKLOAD_FILE"
+        java -jar "$JAR_FILE" -db "$DB_CLASS" -P "$WORKLOAD_FILE"
         ;;
     "scan")
         WORKLOAD_FILE="workloads/workload_scan"
@@ -114,7 +113,7 @@ case "$OPERATION" in
         echo "=========================================="
         echo "执行扫描测试..."
         echo "=========================================="
-        java -jar "$JAR_FILE" -P "$WORKLOAD_FILE"
+        java -jar "$JAR_FILE" -db "$DB_CLASS" -P "$WORKLOAD_FILE"
         ;;
     "load")
         # 检查是否提供了workload文件参数
@@ -128,7 +127,7 @@ case "$OPERATION" in
             echo "使用指定的workload文件执行数据加载..."
             echo "Workload文件：$WORKLOAD_FILE"
             echo "=========================================="
-            java -jar "$JAR_FILE" -P "$WORKLOAD_FILE" -load
+            java -jar "$JAR_FILE" -db "$DB_CLASS" -P "$WORKLOAD_FILE" -load
         else
             # 交互式选择workload文件
             echo "=========================================="
@@ -165,7 +164,7 @@ case "$OPERATION" in
             echo "=========================================="
             echo "执行数据加载..."
             echo "=========================================="
-            java -jar "$JAR_FILE" -P "$WORKLOAD_FILE" -load
+            java -jar "$JAR_FILE" -db "$DB_CLASS" -P "$WORKLOAD_FILE" -load
         fi
         ;;
     "batch_put")
@@ -177,7 +176,7 @@ case "$OPERATION" in
         echo "=========================================="
         echo "执行批量写入测试..."
         echo "=========================================="
-        java -jar "$JAR_FILE" -P "$WORKLOAD_FILE"
+        java -jar "$JAR_FILE" -db "$DB_CLASS" -P "$WORKLOAD_FILE"
         ;;
     "batch_read")
         WORKLOAD_FILE="workloads/workload_batch_read"
@@ -188,7 +187,7 @@ case "$OPERATION" in
         echo "=========================================="
         echo "执行批量读取测试..."
         echo "=========================================="
-        java -jar "$JAR_FILE" -P "$WORKLOAD_FILE"
+        java -jar "$JAR_FILE" -db "$DB_CLASS" -P "$WORKLOAD_FILE"
         ;;
     "run")
         if [ $# -lt 2 ]; then
@@ -205,7 +204,7 @@ case "$OPERATION" in
         echo "使用自定义workload文件执行测试..."
         echo "Workload文件：$WORKLOAD_FILE"
         echo "=========================================="
-        java -jar "$JAR_FILE" -P "$WORKLOAD_FILE"
+        java -jar "$JAR_FILE" -db "$DB_CLASS" -P "$WORKLOAD_FILE"
         ;;
     *)
         echo "错误：不支持的操作类型：$OPERATION"

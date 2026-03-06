@@ -67,8 +67,8 @@ hbase.oceanbase.password=
 hbase.oceanbase.database=test
 
 # ========== 表名 ==========
-hbase.oceanbase.table=
-hbase.oceanbase.columnFamily=
+hbase.oceanbase.table=ycsb_test
+hbase.oceanbase.columnFamily=cf
 
 # ========== 分区配置（二级分区表必填） ==========
 obkv.rangePartitionStartTs=

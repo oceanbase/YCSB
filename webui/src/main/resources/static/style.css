@@ -70,7 +70,8 @@ html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif; font-
 .toggle-group { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .toggle-btn { background: var(--bg-input); border: none; color: var(--text-muted); cursor: pointer; padding: 5px 12px; font-size: 12px; transition: all 0.15s; }
 .toggle-btn.active { background: var(--accent); color: #fff; }
-.toggle-btn:hover:not(.active) { background: var(--border-subtle); }
+.toggle-btn:hover:not(.active):not(.mode-locked) { background: var(--border-subtle); }
+.toggle-btn.mode-locked { opacity: 0.4; cursor: not-allowed; }
 
 /* ===== Button group (test types / 表模式 / 分区类型) ===== */
 .btn-group { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -185,14 +186,15 @@ html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif; font-
 .workload-textarea:focus { outline: none; border-color: var(--accent); }
 
 /* ===== Log area ===== */
-.log-container { flex: 1; overflow-y: auto; background: var(--bg-input); padding: 8px 12px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.6; }
-.log-line { white-space: pre-wrap; word-break: break-all; }
+.log-container { flex: 1; overflow-y: auto; background: var(--bg-input); padding: 8px 12px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.5; }
+.log-line { white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.5; }
 .log-line.hl-result { color: var(--warn); }
 .log-line.hl-error  { color: var(--danger); }
 .log-line.hl-status { color: var(--accent); }
 
 /* ===== Result panel ===== */
 .result-panel { padding: 12px; overflow-y: auto; }
+.result-failed-hint { color: var(--danger, #c7222e); font-size: 13px; margin: 0; }
 .result-cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .result-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; min-width: 140px; }
 .result-card-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
@@ -206,7 +208,8 @@ html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif; font-
 
 /* ===== Table wizard ===== */
 .table-wizard { display: flex; height: 100%; overflow: hidden; }
-.sql-panel { flex: 1; overflow-y: auto; background: var(--bg-input); }
+.table-wizard .config-panel { width: auto; max-width: 420px; min-width: 280px; flex-shrink: 0; }
+.sql-panel { flex: 1; min-width: 0; overflow-y: auto; background: var(--bg-input); padding: 12px; }
 .sql-textarea { width: 100%; height: 200px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); font-family: monospace; font-size: 12px; border-radius: 6px; padding: 10px; resize: vertical; }
 .result-msg { font-size: 13px; padding: 6px 10px; border-radius: 6px; }
 .result-msg.success { background: rgba(26,127,55,0.15); border: 1px solid var(--success); color: var(--success); }

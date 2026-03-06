@@ -35,10 +35,10 @@ fieldcount=10
 fieldlength=100
 
 insertproportion=0
-readproportion=0
+readproportion=1
 updateproportion=0
 readmodifywriteproportion=0
-scanproportion=1
+scanproportion=0
 # for batch operation
 batchputproportion=0
 batchput.size.per.op=10

@@ -31,6 +31,11 @@ public class TableService {
     @Value("${webui.table.workdir:obkv-table}")
     private String tableWorkdir;
 
+    @Value("${webui.runs.dir:webui-runs}")
+    private String webuiRunsDir;
+
+    private static final String TABLE_SQL_SUBDIR = "table-sql";
+
     /**
      * Calls create_table.sh for the given module and returns the generated SQL.
      */
@@ -54,10 +59,12 @@ public class TableService {
 
     private SqlResult generateHbaseSql(Map<String, String> params) throws IOException, InterruptedException {
         Path workdir = Paths.get(hbaseWorkdir).toAbsolutePath();
+        Path outputPath = resolveTableSqlOutputPath("obkv-hbase", params.get("table_name"));
+        Files.createDirectories(outputPath.getParent());
+
         List<String> cmd = new ArrayList<>();
         cmd.add("bash");
         cmd.add("create_table.sh");
-
         // Map UI params to script flags
         // Frontend: "type"=hbase|ts (table model) → script --mode
         //           "mode"=first_part|sec_part (partition level) → script --type
@@ -73,6 +80,8 @@ public class TableService {
         addParam(cmd, params, "--key_subpartition_count",  "key_subpartition_count");
         addParam(cmd, params, "--table_name",              "table_name");
         addParam(cmd, params, "--family",                  "family");
+        cmd.add(2, outputPath.toAbsolutePath().toString());
+        cmd.add(2, "--output_file");
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(workdir.toFile());
@@ -101,9 +110,7 @@ public class TableService {
             return new SqlResult(false, null, "create_table.sh failed (exit " + exitCode + "):\n" + errMsg);
         }
 
-        // Prefer reading from the generated .sql file (avoids any stderr contamination).
-        // Fall back to stdout if the file is not found.
-        String sql = readNewestSqlFile(workdir);
+        String sql = readSqlFromFile(outputPath);
         if (sql == null || sql.trim().isEmpty()) {
             sql = stdoutOutput.trim();
         }
@@ -116,10 +123,14 @@ public class TableService {
 
     private SqlResult generateTableSql(Map<String, String> params) throws IOException, InterruptedException {
         Path workdir = Paths.get(tableWorkdir).toAbsolutePath();
+        Path outputPath = resolveTableSqlOutputPath("obkv-table", "kv_table");
+        Files.createDirectories(outputPath.getParent());
+
         List<String> cmd = new ArrayList<>();
         cmd.add("bash");
         cmd.add("create_table.sh");
-
+        cmd.add("--output_file");
+        cmd.add(outputPath.toAbsolutePath().toString());
         // obkv-table create_table.sh uses positional args: --mode <mode> --fields <n> ...
         addParam(cmd, params, "--mode",   "mode");
         addParam(cmd, params, "--fields", "fields");
@@ -129,6 +140,8 @@ public class TableService {
             addPositional(cmd, params, "num_partitions");
             addPositional(cmd, params, "max_key");
             addPositional(cmd, params, "key_length");
+        } else if ("key".equals(mode)) {
+            addPositional(cmd, params, "num_partitions");
         } else {
             addPositional(cmd, params, "range_partition_count");
             addPositional(cmd, params, "key_subpartition_count");
@@ -148,13 +161,27 @@ public class TableService {
             return new SqlResult(false, null, "create_table.sh failed (exit " + exitCode + "):\n" + scriptOutput);
         }
 
-        // obkv-table only writes to file, read newest .sql
-        String sql = readNewestSqlFile(workdir);
+        String sql = readSqlFromFile(outputPath);
         if (sql == null || sql.isEmpty()) {
             return new SqlResult(false, null, "create_table.sh succeeded but no SQL file found");
         }
 
         return new SqlResult(true, sql, "SQL generated successfully");
+    }
+
+    /** Resolves output path under webui-runs/table-sql/ with a unique filename. */
+    private Path resolveTableSqlOutputPath(String module, String tableName) {
+        String base = (tableName != null && !tableName.isEmpty()) ? tableName : "table";
+        String safeName = base.replaceAll("[^a-zA-Z0-9_-]", "_");
+        String filename = safeName + "_" + module + "_" + System.currentTimeMillis() + ".sql";
+        return Paths.get(webuiRunsDir, TABLE_SQL_SUBDIR).toAbsolutePath().resolve(filename);
+    }
+
+    private String readSqlFromFile(Path path) throws IOException {
+        if (!Files.isRegularFile(path)) {
+            return null;
+        }
+        return new String(Files.readAllBytes(path));
     }
 
     private void addParam(List<String> cmd, Map<String, String> params, String flag, String key) {

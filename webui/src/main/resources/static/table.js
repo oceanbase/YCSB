@@ -67,7 +67,7 @@ const TableWizard = (() => {
     addRow(container, '表名',   makeInput('tc-table-name', 'text', 'ycsb_test'));
     addRow(container, '列族',   makeInput('tc-family', 'text', 'cf'));
 
-    const partSel = makeSelect('tc-part-mode', [['first_part','单分区'],['sec_part','双分区']], 'first_part');
+    const partSel = makeSelect('tc-part-mode', [['first_part','一级分区'],['sec_part','二级分区']], 'first_part');
     addRow(container, '分区层级', partSel);
 
     // Single partition fields
@@ -98,6 +98,20 @@ const TableWizard = (() => {
     addRow(container, '分区数量 *', makeInput('tc-sp-partition-count', 'number', '', '必填，如 128'));
     addRow(container, '最大 Key', makeInput('tc-sp-max-key', 'number', '9223372036854775807'));
     addRow(container, 'Key 长度', makeInput('tc-sp-key-length', 'number', '20'));
+
+    const ptSel      = document.getElementById('tc-sp-partition-type');
+    const maxKeyEl   = document.getElementById('tc-sp-max-key');
+    const keyLenEl   = document.getElementById('tc-sp-key-length');
+
+    function toggleRangeOnlyFields() {
+      const hide = ptSel.value === 'key';
+      [maxKeyEl, maxKeyEl.previousElementSibling,
+       keyLenEl, keyLenEl.previousElementSibling].forEach(el => {
+        el.style.display = hide ? 'none' : '';
+      });
+    }
+
+    ptSel.addEventListener('change', toggleRangeOnlyFields);
   }
 
   function renderHbaseDoublePartFields(container) {
@@ -109,7 +123,7 @@ const TableWizard = (() => {
 
   function renderTableFields(container) {
     addRow(container, '字段数', makeInput('tc-fields', 'number', '1'));
-    const modeSel = makeSelect('tc-table-mode', [['range','range'],['key_range','key_range']], 'range');
+    const modeSel = makeSelect('tc-table-mode', [['range','range'],['key','key'],['key_range','key_range']], 'range');
     addRow(container, '分区模式', modeSel);
 
     const rangeDiv = document.createElement('div');
@@ -119,6 +133,13 @@ const TableWizard = (() => {
     container.appendChild(rangeDiv);
     renderTableRangeFields(rangeDiv);
 
+    const keyDiv = document.createElement('div');
+    keyDiv.id = 'tc-key-fields';
+    keyDiv.className = 'fields-grid';
+    keyDiv.style.cssText = 'grid-column:1/-1;display:none;';
+    container.appendChild(keyDiv);
+    renderTableKeyFields(keyDiv);
+
     const rkDiv = document.createElement('div');
     rkDiv.id = 'tc-rk-fields';
     rkDiv.className = 'fields-grid';
@@ -127,16 +148,21 @@ const TableWizard = (() => {
     renderTableRangeKeyFields(rkDiv);
 
     modeSel.addEventListener('change', () => {
-      const isRange = modeSel.value === 'range';
-      rangeDiv.style.display = isRange ? '' : 'none';
-      rkDiv.style.display    = isRange ? 'none' : '';
+      const val = modeSel.value;
+      rangeDiv.style.display = val === 'range' ? '' : 'none';
+      keyDiv.style.display   = val === 'key' ? '' : 'none';
+      rkDiv.style.display    = val === 'key_range' ? '' : 'none';
     });
   }
 
   function renderTableRangeFields(container) {
     addRow(container, '分区数量 *',   makeInput('tc-r-num-parts', 'number', '', '必填，如 128'));
-    addRow(container, '最大 Key *',   makeInput('tc-r-max-key', 'number', '', '必填，如 9223372036854775807'));
+    addRow(container, '最大 Key *',   makeInput('tc-r-max-key', 'number', '9223372036854775807'));
     addRow(container, 'Key 长度',     makeInput('tc-r-key-length', 'number', '20'));
+  }
+
+  function renderTableKeyFields(container) {
+    addRow(container, '分区数量 *',   makeInput('tc-k-num-parts', 'number', '', '必填，如 128'));
   }
 
   function renderTableRangeKeyFields(container) {
@@ -155,11 +181,14 @@ const TableWizard = (() => {
       mode:       mode,
     };
     if (mode === 'first_part') {
+      const partitionType = document.getElementById('tc-sp-partition-type').value;
       Object.assign(params, {
-        partition_type:  document.getElementById('tc-sp-partition-type').value,
+        partition_type:  partitionType,
         partition_count: document.getElementById('tc-sp-partition-count').value,
-        max_key:         document.getElementById('tc-sp-max-key').value,
-        key_length:      document.getElementById('tc-sp-key-length').value,
+        ...(partitionType === 'range' ? {
+          max_key:    document.getElementById('tc-sp-max-key').value,
+          key_length: document.getElementById('tc-sp-key-length').value,
+        } : {}),
       });
     } else {
       Object.assign(params, {
@@ -183,6 +212,10 @@ const TableWizard = (() => {
         num_partitions: document.getElementById('tc-r-num-parts').value,
         max_key:        document.getElementById('tc-r-max-key').value,
         key_length:     document.getElementById('tc-r-key-length').value,
+      });
+    } else if (mode === 'key') {
+      Object.assign(params, {
+        num_partitions: document.getElementById('tc-k-num-parts').value,
       });
     } else {
       Object.assign(params, {
@@ -211,6 +244,8 @@ const TableWizard = (() => {
       if (params.mode === 'range') {
         if (!params.num_partitions) errors.push('分区数量 不能为空');
         if (!params.max_key)        errors.push('最大 Key 不能为空');
+      } else if (params.mode === 'key') {
+        if (!params.num_partitions) errors.push('分区数量 不能为空');
       } else {
         if (!params.range_partition_count)  errors.push('Range 分区数 不能为空');
         if (!params.key_subpartition_count) errors.push('Key 子分区数 不能为空');

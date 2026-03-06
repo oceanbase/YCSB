@@ -29,7 +29,7 @@ echo "=========================================="
 # 默认 DB 类（range 表）
 DEFAULT_DB_CLASS="com.oceanbase.obkv.table.ycsb.ObTableClientDB"
 RK_DB_CLASS="com.oceanbase.obkv.table.ycsb.ObTableClientDBRK"
-TABLE_MODE="range"  # range | range_key
+TABLE_MODE="default"  # default | prefix
 
 # 解析全局选项（必须放在 OPERATION 之前）
 while [[ $# -gt 0 ]]; do
@@ -39,12 +39,12 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            echo "用法：$0 [--table-mode {range|range_key}] {put|read|scan|load [workload_file]|batch_put|batch_read|run <workload_file>}"
+            echo "用法：$0 [--table-mode {default|prefix}] {put|read|scan|load [workload_file]|batch_put|batch_read|run <workload_file>}"
             echo ""
             echo "全局选项："
-            echo "  --table-mode range|range_key  指定测试表模式对应的 DB 类（默认 range）"
-            echo "    - range     : $DEFAULT_DB_CLASS"
-            echo "    - range_key : $RK_DB_CLASS"
+            echo "  --table-mode default|prefix  指定测试表模式对应的 DB 类（默认 default）"
+            echo "    - default : $DEFAULT_DB_CLASS"
+            echo "    - prefix  : $RK_DB_CLASS"
             echo ""
             echo "操作说明："
             echo "  put        - 执行写入测试"
@@ -57,8 +57,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "示例："
             echo "  $0 load"
-            echo "  $0 --table-mode range_key load workloads/workload_load"
-            echo "  $0 --table-mode range put"
+            echo "  $0 --table-mode prefix load workloads/workload_load"
+            echo "  $0 --table-mode default put"
             echo "  $0 run /path/to/custom/workload"
             exit 0
             ;;
@@ -70,15 +70,15 @@ done
 
 # 根据 table mode 选择 DB 类
 case "$TABLE_MODE" in
-    range|"")
+    default|"")
         DB_CLASS="$DEFAULT_DB_CLASS"
         ;;
-    range_key)
+    prefix)
         DB_CLASS="$RK_DB_CLASS"
         ;;
     *)
         echo "错误：不支持的 --table-mode：$TABLE_MODE"
-        echo "支持的模式：range, range_key"
+        echo "支持的模式：default, prefix"
         exit 1
         ;;
 esac
@@ -98,12 +98,12 @@ echo "检测到Java版本：$JAVA_VERSION"
 
 # 检查命令行参数
 if [ $# -eq 0 ]; then
-    echo "用法：$0 [--table-mode {range|range_key}] {put|read|scan|load [workload_file]|batch_put|batch_read|run <workload_file>}"
+    echo "用法：$0 [--table-mode {default|prefix}] {put|read|scan|load [workload_file]|batch_put|batch_read|run <workload_file>}"
     echo ""
     echo "选项说明："
-    echo "  --table-mode range|range_key  指定测试表模式对应的 DB 类（默认 range）"
-    echo "    - range     : $DEFAULT_DB_CLASS"
-    echo "    - range_key : $RK_DB_CLASS"
+    echo "  --table-mode default|prefix  指定测试表模式对应的 DB 类（默认 default）"
+    echo "    - default : $DEFAULT_DB_CLASS"
+    echo "    - prefix  : $RK_DB_CLASS"
     echo "  put        - 执行写入测试"
     echo "  read       - 执行读取测试"
     echo "  scan       - 执行扫描测试"

@@ -7,6 +7,60 @@ const Test = (() => {
   const sessions = [];    // { testId, label, meta, logLines, result }
   let activeIdx = -1;
   let sessionCounter = 0;
+  let runningPollTimer = null;
+
+  const MAX_LOG_LINES = 1000;
+
+  function appendLogLines(idx, lines, session) {
+    const container = document.getElementById(`log-${idx}`);
+    if (!container || !lines.length) return;
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      if (/\[OVERALL\]|\[READ\]|\[INSERT\]|\[UPDATE\]|\[SCAN\]/.test(line)) div.classList.add('hl-result');
+      else if (/ERROR|FAILED/i.test(line)) div.classList.add('hl-error');
+      else if (/sec:/.test(line)) div.classList.add('hl-status');
+      div.textContent = line;
+      frag.appendChild(div);
+    }
+    container.appendChild(frag);
+    while (container.childElementCount > MAX_LOG_LINES) {
+      container.removeChild(container.firstElementChild);
+    }
+    if (session.autoScroll) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }
+
+  function startRunningPollIfNeeded() {
+    if (runningPollTimer != null) return;
+    runningPollTimer = setInterval(async () => {
+      for (let idx = 0; idx < sessions.length; idx++) {
+        const session = sessions[idx];
+        if (!session || session._closed || session.status !== 'RUNNING') continue;
+        try {
+          const res = await fetch(`/api/tests/${session.testId}/meta`);
+          if (!res.ok) continue;
+          const meta = await res.json();
+          const s = (meta.status || '').toUpperCase();
+          if (s === 'RUNNING') continue;
+          const statusClass = s === 'COMPLETED' ? 'completed' : 'failed';
+          updateSessionStatus(idx, statusClass);
+          fetchResult(session, idx);
+        } catch (_) { /* ignore */ }
+      }
+    }, 5000);
+  }
+
+  function stopRunningPollIfIdle() {
+    const hasRunning = sessions.some(s => s && !s._closed && s.status === 'RUNNING');
+    if (!hasRunning && runningPollTimer != null) {
+      clearInterval(runningPollTimer);
+      runningPollTimer = null;
+    }
+  }
 
   function init() {
     // Launch button(s) - may be one or two (load + run for read/scan)
@@ -17,16 +71,15 @@ const Test = (() => {
   function updateLaunchButtons() {
     const wrap = document.getElementById('launchButtonsWrap');
     if (!wrap) return;
-    const isReadOrScan = () => { const t = Config.getActiveTestType(); return t === 'read' || t === 'scan'; };
-    if (isReadOrScan()) {
-      wrap.innerHTML = '<button id="loadDataBtn" class="btn btn-primary btn-lg" style="margin-bottom:8px">1. 加载数据</button><button id="startTestBtn" class="btn btn-primary btn-lg">2. 执行测试</button>';
-      document.getElementById('startTestBtn').addEventListener('click', () => launchTest(false));
-      const lb = document.getElementById('loadDataBtn');
-      if (lb) lb.addEventListener('click', () => launchTest(true));
-    } else {
-      wrap.innerHTML = '<button id="startTestBtn" class="btn btn-primary btn-lg">▶ 发起新测试</button>';
-      document.getElementById('startTestBtn').addEventListener('click', () => launchTest(false));
-    }
+    wrap.innerHTML = '<div style="display:flex;flex-direction:column;gap:6px">'
+      + '<div style="display:flex;gap:8px">'
+      + '<button id="loadDataBtn" class="btn btn-primary btn-lg">1. 加载数据</button>'
+      + '<button id="startTestBtn" class="btn btn-primary btn-lg">2. 执行测试</button>'
+      + '</div>'
+      + '<span style="font-size:12px;color:#888">PS: 不需要加载数据可直接发起测试</span>'
+      + '</div>';
+    document.getElementById('startTestBtn').addEventListener('click', () => launchTest(false));
+    document.getElementById('loadDataBtn').addEventListener('click', () => launchTest(true));
   }
 
   // ---- Launch test ----
@@ -35,12 +88,8 @@ const Test = (() => {
     const testType = forceLoadPhase ? 'load' : Config.getActiveTestType();
     let workloadContent;
     if (forceLoadPhase) {
-      const params = Config.collectAllFormParams();
-      params['insertproportion'] = '1';
-      params['readproportion'] = '0';
-      params['scanproportion'] = '0';
-      params['updateproportion'] = '0';
-      workloadContent = Config.buildWorkloadContent(params, 'load', Config.getActiveModule(), true);
+      workloadContent = Config.buildWorkloadContent(
+        Config.collectAllFormParams(), 'load', Config.getActiveModule(), true);
     } else {
       workloadContent = Config.buildWorkloadContent(
         Config.collectAllFormParams(), Config.getActiveTestType(), Config.getActiveModule(), Config.isLoadTest()
@@ -92,12 +141,15 @@ const Test = (() => {
       rtData: {},   // { opType: [{ sec, avgMs, p99Ms, p999Ms }], ... } from real-time log [OP: Avg=, 99=, 99.9=]
       result: null,
       autoScroll: true,
+      pendingLines: [],
+      rafScheduled: false,
     };
     sessions.push(session);
     const idx = sessions.length - 1;
     renderSessionTab(idx, session);
     activateSession(idx);
     startLogStream(session, idx);
+    startRunningPollIfNeeded();
   }
 
   function renderSessionTab(idx, session) {
@@ -185,10 +237,17 @@ const Test = (() => {
 
     initSessionResize(idx);
 
-    if (session.logLines.length > 0) {
-      const logContainer = document.getElementById(`log-${idx}`);
-      session.logLines.forEach(line => appendLogLine(logContainer, line));
-      if (session.autoScroll) logContainer.scrollTop = logContainer.scrollHeight;
+    const logContainer = document.getElementById(`log-${idx}`);
+    if (logContainer) {
+      logContainer.addEventListener('scroll', () => {
+        const atBottom = logContainer.scrollTop + logContainer.clientHeight >= logContainer.scrollHeight - 50;
+        session.autoScroll = atBottom;
+        const chk = document.getElementById(`auto-scroll-${idx}`);
+        if (chk) chk.checked = atBottom;
+      });
+      if (session.logLines.length > 0) {
+        appendLogLines(idx, session.logLines, session);
+      }
     }
     if (session.chartData.length > 0 && typeof Chart.drawLiveChart === 'function') {
       Chart.drawLiveChart(`live-chart-ops-${idx}`, session.chartData);
@@ -281,6 +340,12 @@ const Test = (() => {
     }
     SSE.disconnect(session.testId);
     session._closed = true;
+    session.logLines = [];
+    session.chartData = [];
+    session.rtData = {};
+    session.pendingLines = [];
+    session.rafScheduled = false;
+    stopRunningPollIfIdle();
     const tab = document.getElementById(`session-tab-${idx}`);
     if (tab) tab.remove();
     if (activeIdx === idx) {
@@ -300,73 +365,87 @@ const Test = (() => {
   function startLogStream(session, idx) {
     let lastSec = 0;
     SSE.connect(session.testId, {
-      onLog: line => {
-        session.logLines.push(line);
-        if (session.logLines.length > 1000) session.logLines.shift();
-        const statusMatch = line.match(/(\d+)\s+sec:\s*(\d+)\s+operations/);
-        if (statusMatch) {
-          const sec = parseInt(statusMatch[1], 10);
-          lastSec = sec;
-          const totalOps = parseInt(statusMatch[2], 10);
-          session.chartData.push({ sec, totalOps });
-          if (activeIdx === idx) {
-            const opsCanvas = document.getElementById(`live-chart-ops-${idx}`);
-            if (opsCanvas && typeof Chart.drawLiveChart === 'function') Chart.drawLiveChart(`live-chart-ops-${idx}`, session.chartData);
-          }
-        }
-        // Parse RT from [OP: Count=..., Avg=..., 99=..., 99.9=...] (values in us -> ms). Only main op types.
+      onLog: data => {
+        const lines = (typeof data === 'string' ? data : '').split('\n').filter(Boolean);
+        if (!lines.length) return;
         const RT_OP_TYPES = ['INSERT', 'READ', 'UPDATE', 'SCAN', 'BATCH_READ', 'BATCH_PUT'];
-        const blockRe = /\[([^\]:]+):\s*([^\]]+)\]/g;
-        let blockM;
-        while ((blockM = blockRe.exec(line)) !== null) {
-          const opType = blockM[1].trim().toUpperCase();
-          if (!RT_OP_TYPES.includes(opType)) continue;
-          const rest = blockM[2];
-          const avgM = rest.match(/Avg=([\d.]+)/);
-          const p99M = rest.match(/\b99=([\d.]+)/);
-          const p999M = rest.match(/99\.9=([\d.]+)/);
-          if (opType && lastSec >= 0 && (avgM || p99M || p999M)) {
-            const avgUs = avgM ? parseFloat(avgM[1], 10) : null;
-            const p99Us = p99M ? parseFloat(p99M[1], 10) : null;
-            const p999Us = p999M ? parseFloat(p999M[1], 10) : null;
-            const avgMs = avgUs != null ? avgUs / 1000 : null;
-            const p99Ms = p99Us != null ? p99Us / 1000 : null;
-            const p999Ms = p999Us != null ? p999Us / 1000 : null;
-            if (!session.rtData[opType]) session.rtData[opType] = [];
-            session.rtData[opType].push({ sec: lastSec, avgMs, p99Ms, p999Ms });
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          session.logLines.push(line);
+          if (session.logLines.length > MAX_LOG_LINES) session.logLines.shift();
+          const statusMatch = line.match(/(\d+)\s+sec:\s*(\d+)\s+operations/);
+          if (statusMatch) {
+            const sec = parseInt(statusMatch[1], 10);
+            lastSec = sec;
+            const totalOps = parseInt(statusMatch[2], 10);
+            session.chartData.push({ sec, totalOps });
             if (activeIdx === idx) {
-              const rtCanvas = document.getElementById(`live-chart-rt-${idx}`);
-              if (rtCanvas && typeof Chart.drawLiveChartRt === 'function') Chart.drawLiveChartRt(`live-chart-rt-${idx}`, session.rtData);
+              const opsCanvas = document.getElementById(`live-chart-ops-${idx}`);
+              if (opsCanvas && typeof Chart.drawLiveChart === 'function') Chart.drawLiveChart(`live-chart-ops-${idx}`, session.chartData);
+            }
+          }
+          const blockRe = /\[([^\]:]+):\s*([^\]]+)\]/g;
+          let blockM;
+          while ((blockM = blockRe.exec(line)) !== null) {
+            const opType = blockM[1].trim().toUpperCase();
+            if (!RT_OP_TYPES.includes(opType)) continue;
+            const rest = blockM[2];
+            const avgM = rest.match(/Avg=([\d.]+)/);
+            const p99M = rest.match(/\b99=([\d.]+)/);
+            const p999M = rest.match(/99\.9=([\d.]+)/);
+            if (opType && lastSec >= 0 && (avgM || p99M || p999M)) {
+              const avgUs = avgM ? parseFloat(avgM[1]) : null;
+              const p99Us = p99M ? parseFloat(p99M[1]) : null;
+              const p999Us = p999M ? parseFloat(p999M[1]) : null;
+              const avgMs = avgUs != null ? avgUs / 1000 : null;
+              const p99Ms = p99Us != null ? p99Us / 1000 : null;
+              const p999Ms = p999Us != null ? p999Us / 1000 : null;
+              if (!session.rtData[opType]) session.rtData[opType] = [];
+              session.rtData[opType].push({ sec: lastSec, avgMs, p99Ms, p999Ms });
+              if (activeIdx === idx) {
+                const rtCanvas = document.getElementById(`live-chart-rt-${idx}`);
+                if (rtCanvas && typeof Chart.drawLiveChartRt === 'function') Chart.drawLiveChartRt(`live-chart-rt-${idx}`, session.rtData);
+              }
             }
           }
         }
         if (activeIdx === idx) {
-          const logContainer = document.getElementById(`log-${idx}`);
-          if (logContainer) {
-            appendLogLine(logContainer, line);
-            while (logContainer.childElementCount > 1000) logContainer.removeChild(logContainer.firstChild);
-            if (session.autoScroll) logContainer.scrollTop = logContainer.scrollHeight;
+          for (let i = 0; i < lines.length; i++) session.pendingLines.push(lines[i]);
+          if (!session.rafScheduled) {
+            session.rafScheduled = true;
+            requestAnimationFrame(() => {
+              session.rafScheduled = false;
+              const batch = session.pendingLines.splice(0);
+              appendLogLines(idx, batch, session);
+            });
           }
         }
       },
       onDone: () => {
-        updateSessionStatus(idx, 'completed');
-        fetchResult(session, idx);
+        (async () => {
+          try {
+            const metaRes = await fetch(`/api/tests/${session.testId}/meta`);
+            if (metaRes.ok) {
+              const meta = await metaRes.json();
+              const s = (meta.status || '').toUpperCase();
+              const statusClass = s === 'COMPLETED' ? 'completed' : (s === 'RUNNING' ? 'running' : 'failed');
+              updateSessionStatus(idx, statusClass);
+            } else {
+              updateSessionStatus(idx, 'failed');
+            }
+          } catch (_) {
+            updateSessionStatus(idx, 'failed');
+          }
+          fetchResult(session, idx);
+          stopRunningPollIfIdle();
+        })();
       },
-      onError: () => {
-        updateSessionStatus(idx, 'failed');
+      onError: (e) => {
+        // If server sent an error event with data, treat as test failure
+        if (e && e.data) updateSessionStatus(idx, 'failed');
+        // Otherwise connection dropped; polling will pick up final status
       }
     });
-  }
-
-  function appendLogLine(container, line) {
-    const div = document.createElement('div');
-    div.className = 'log-line';
-    if (/\[OVERALL\]|\[READ\]|\[INSERT\]|\[UPDATE\]|\[SCAN\]/.test(line)) div.classList.add('hl-result');
-    else if (/ERROR|FAILED/i.test(line)) div.classList.add('hl-error');
-    else if (/sec:/.test(line)) div.classList.add('hl-status');
-    div.textContent = line;
-    container.appendChild(div);
   }
 
   function updateSessionStatus(idx, statusClass) {
@@ -378,18 +457,22 @@ const Test = (() => {
       dot.className = `session-status-dot dot-${statusClass}`;
     }
     if (activeIdx === idx) updateConfigBarStopButton(idx, session);
+    stopRunningPollIfIdle();
   }
 
   async function fetchResult(session, idx) {
     try {
       const res = await fetch(`/api/tests/${session.testId}/results`);
-      if (res.ok) {
+      if (res.status === 200) {
         session.result = await res.json();
         if (activeIdx === idx) {
           renderResult(idx, session.result);
           const panel = document.getElementById(`result-panel-${idx}`);
           if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
+      } else if (activeIdx === idx && session.status === 'FAILED') {
+        const panel = document.getElementById(`result-panel-${idx}`);
+        if (panel) panel.innerHTML = '<p class="result-failed-hint">测试失败，请查看上方实时日志中的报错信息</p>';
       }
     } catch (e) { /* ignore */ }
   }

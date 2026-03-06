@@ -22,15 +22,18 @@
 #   Default data size: 1 KB records (10 fields, 100 bytes each, plus key)
 #   Request distribution: zipfian
 
-workload=com.yahoo.ycsb.workloads.CoreWorkload
+workload=site.ycsb.workloads.CoreWorkload
 
 # ATTENTION !!! 
 # for batchput, if you want to insert record without duplication, 
 # the recordcount mut be larger than or eqaul to batchput.size.per.op * operationcount
 # otherwise, it may generate duplicate records and put operation will overwrite them
 table=kv_table
-recordcount=
-operationcount=
+recordcount=1000
+operationcount=100
+
+fieldcount=10
+fieldlength=100
 
 insertproportion=0
 readproportion=0
@@ -68,6 +71,6 @@ obkv.database=test
 obkv.rangePartitionStartTs=
 obkv.rangePartitionDurationMs=
 obkv.rangePartitionCount=
-obkv.idCount=
+obkv.prefixCount=
 
 obkv.debug=false

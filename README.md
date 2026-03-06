@@ -16,49 +16,43 @@ permissions and limitations under the License. See accompanying
 LICENSE file.
 -->
 
-
 # YCSB for OBKV
-本 YCSB 发行版包含两个 OBKV 模型绑定：
 
-## OBKV-HBase 绑定
+基于 YCSB (Yahoo! Cloud Serving Benchmark) 框架的 OceanBase KV 性能测试工具，支持 **OBKV-HBase** 和 **OBKV-Table** 两种模型，提供 **Web UI** 和**命令行**两种使用方式。
 
-**obkv-hbase** 绑定用于测试 OceanBase HBase 兼容模式的性能。
+## 两种使用方式
 
-**功能特性：**
-- 支持 ODP 模式和直连模式
-- Range 分区配合 Key 子分区
-- 多版本模式支持
-- 批量操作（batchPut、batchRead）
-- 自动建表脚本
+### Web UI（图形界面）
 
-**快速开始：**
-```sh
-cd obkv-hbase
-./build.sh
-./create_table.sh 1 40
-./run_fast_test.sh load
-./run_fast_test.sh read
+```bash
+./deploy.sh start --rebuild     # 首次启动（自动编译 + 启动）
+# 浏览器访问 http://localhost:8080
 ```
 
-详细文档请参考 [obkv-hbase/README.md](obkv-hbase/README.md)。
+通过浏览器完成建表、配置、运行测试、查看结果。
 
-## OBKV-Table 绑定
+### 命令行（黑屏）
 
-**obkv-table** 绑定用于测试 OceanBase Table 模型的性能。
-
-**功能特性：**
-- 支持 Range 分区和 Range+Key 分区
-- 灵活的表创建配置，支持多种分区策略
-- 支持多种工作负载类型
-
-**快速开始：**
-```sh
-cd obkv-table
-./build.sh
+```bash
+cd obkv-table && ./build.sh
 ./create_table.sh --mode range 4 1000
+# 在 OceanBase 中执行生成的 SQL
 ./run_fast_test.sh load
 ./run_fast_test.sh read
 ```
 
-详细文档请参考 [obkv-table/README.md](obkv-table/README.md)。
+## 文档索引
 
+| 文档 | 说明 | 适合读者 |
+|------|------|----------|
+| [快速入门](docs/getting-started.md) | 5 分钟跑通第一次测试 | 所有人（首先阅读） |
+| [Web UI 使用指南](docs/guide-webui.md) | 图形界面完整操作说明 | Web UI 用户 |
+| [命令行使用指南](docs/guide-cli.md) | 黑屏方式完整操作说明 | 命令行用户 |
+| [参数配置大全](docs/params-reference.md) | 所有参数的含义、类型、默认值 | 需要调参的用户 |
+| [Workload 参考](docs/workload-reference.md) | Workload 文件模板与示例 | 需要写配置的用户 |
+| [OBKV-Table 模块详解](docs/module-obkv-table.md) | 表结构、分区策略、建表脚本 | 深入 OBKV-Table |
+| [OBKV-HBase 模块详解](docs/module-obkv-hbase.md) | 表模型、测试模式、分区策略 | 深入 OBKV-HBase |
+| [Web UI 架构设计](docs/webui-architecture.md) | 架构、SSE、资源隔离 | 开发者 |
+| [Web UI 扩展指南](docs/webui-extension-guide.md) | 新增模块或修改参数 | 开发者 |
+| [Web UI API 参考](docs/webui-api-reference.md) | REST API 完整文档 | 开发者 |
+| [常见问题](docs/faq.md) | FAQ 汇总 | 遇到问题时查阅 |

@@ -536,10 +536,10 @@ public class CoreWorkload extends Workload {
       orderedinserts = true;
     }
 
-    // If dotransactions is false, force orderedinserts to true
-    if (!p.getProperty(Client.DO_TRANSACTIONS_PROPERTY, String.valueOf(true)).equals("true")) {
-      orderedinserts = true;
-    }
+    // // If dotransactions is false, force orderedinserts to true
+    // if (!p.getProperty(Client.DO_TRANSACTIONS_PROPERTY, String.valueOf(true)).equals("true")) {
+    //   orderedinserts = true;
+    // }
 
     boolean useStridedKeyGenerator = Boolean.parseBoolean(
         p.getProperty(USE_STRIDED_KEY_GENERATOR_PROPERTY, USE_STRIDED_KEY_GENERATOR_PROPERTY_DEFAULT));
@@ -904,7 +904,7 @@ public class CoreWorkload extends Workload {
     long st = System.nanoTime();
     db.scan(table, startkeyname, len, fields, scannedRecords);
     long en = System.nanoTime();
-    measurements.measure("SCAN-LATENCY-PER-RECORD", (int) ((en - st) / 1000 / scannedRecords.size()));
+    // measurements.measure("SCAN-LATENCY-PER-RECORD", (int) ((en - st) / 1000 / scannedRecords.size()));
   }
 
   public void doTransactionUpdate(DB db) {

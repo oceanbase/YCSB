@@ -59,22 +59,19 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
     public static final String PROP_KEY_PARTITION_START_TS      = "obkv.rangePartitionStartTs";
     public static final String PROP_KEY_PARTITION_DURATION_MS   = "obkv.rangePartitionDurationMs";
     public static final String PROP_KEY_PARTITION_COUNT         = "obkv.rangePartitionCount";
-    public static final String PROP_KEY_ID_COUNT                = "obkv.idCount";
+    public static final String PROP_KEY_PREFIX_COUNT             = "obkv.prefixCount";
 
     private ObTableClient client = null;
-    private String tableName;
     private boolean debug = false;
-    private boolean isHeapTable = false;
     private int threadCount = 3;
     private ExecutorService executorService;
     private String insertType;
     private String updateType;
     private String batchPutType;
-    private int zeropadding;
     private long partitionStartTs = 0;  // 第一个range分区的起始时间戳（毫秒）
     private long partitionDurationMs = 0;  // 每个range分区的时间长度（毫秒）
     private int partitionCount = 0;  // 一级range分区的数量
-    private int idCount = 1;  // id的总数量
+    private int prefixCount = 10000;  // 前缀ID的总数
     private String idColumn = "ycsb_id";
     private String tsColumn = "ycsb_ts";
 
@@ -106,13 +103,13 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             client.setOdpAddr(props.getProperty(PROP_KEY_ODP_ADDR));
             client.setOdpPort(Integer.parseInt(props.getProperty(PROP_KEY_ODP_PORT)));
             client.setDatabase(props.getProperty(PROP_KEY_DATABASE));
-            client.setPassword(props.getProperty(PROP_KEY_PASSWORD));
+            client.setPassword(props.getProperty(PROP_KEY_PASSWORD, ""));
         } else {
             client.setFullUserName(props.getProperty(PROP_KEY_FULL_USER_NAME));
             client.setParamURL(props.getProperty(PROP_KEY_CONFIG_URL));
-            client.setPassword(props.getProperty(PROP_KEY_PASSWORD));
+            client.setPassword(props.getProperty(PROP_KEY_PASSWORD, ""));
             client.setSysUserName(props.getProperty(PROP_KEY_SYS_USER_NAME));
-            client.setSysPassword(props.getProperty(PROP_KEY_SYS_PASSWORD));
+            client.setSysPassword(props.getProperty(PROP_KEY_SYS_PASSWORD, ""));
         }
 
         // Some other useful property
@@ -143,7 +140,6 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
         if (props.getProperty(PROP_KEY_BATCH_THREAD_COUNT) != null) {
             threadCount = Integer.parseInt(props.getProperty(PROP_KEY_BATCH_THREAD_COUNT));
         }
-        zeropadding = Integer.parseInt(getProperties().getProperty("zeropadding", "12"));   
         
         // partition configuration for uniform distribution - 必须显式指定且值必须大于0
         if (props.getProperty(PROP_KEY_PARTITION_START_TS) != null) {
@@ -176,14 +172,14 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_PARTITION_COUNT + 
                                 " (must be greater than 0, integer)");
         }
-        if (props.getProperty(PROP_KEY_ID_COUNT) != null) {
-            idCount = Integer.parseInt(props.getProperty(PROP_KEY_ID_COUNT));
-            if (idCount <= 0) {
-                throw new DBException("Invalid partition configuration: " + PROP_KEY_ID_COUNT + 
+        if (props.getProperty(PROP_KEY_PREFIX_COUNT) != null) {
+            prefixCount = Integer.parseInt(props.getProperty(PROP_KEY_PREFIX_COUNT));
+            if (prefixCount <= 0) {
+                throw new DBException("Invalid partition configuration: " + PROP_KEY_PREFIX_COUNT + 
                                     " must be specified and greater than 0 (integer)");
             }
         } else {
-            throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_ID_COUNT + 
+            throw new DBException("Partition configuration is required. Please specify: " + PROP_KEY_PREFIX_COUNT + 
                                 " (must be greater than 0, integer)");
         }
         
@@ -191,7 +187,7 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             System.out.println("Partition config: startTs=" + partitionStartTs + 
                              ", durationMs=" + partitionDurationMs + 
                              ", count=" + partitionCount +
-                             ", idCount=" + idCount);
+                             ", prefixCount=" + prefixCount);
         }
         
         executorService = Executors.newFixedThreadPool(threadCount);
@@ -248,7 +244,7 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
     }
 
     /**
-     * 基于key生成唯一id，确保id数量为idCount，循环使用
+     * 基于key生成唯一id，确保id数量为prefixCount，循环使用
      * @param key YCSB 生成的 key，是一个整型字符串（递增id）
      * @return id 字符串，长度为 36
      */
@@ -261,8 +257,8 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             keyValue = Math.abs((long)key.hashCode());
         }
         
-        // id = key % idCount，确保id循环使用
-        long idValue = keyValue % idCount;
+        // id = key % prefixCount，确保id循环使用
+        long idValue = keyValue % prefixCount;
         
         return String.valueOf(idValue);
     }

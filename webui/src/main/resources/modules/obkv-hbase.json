@@ -44,7 +44,7 @@
       "fields": [
         {"key": "obkv.prefixCount", "label": "Prefix 数量", "type": "number", "required": true}
       ],
-      "fixedValues": {"insertorder": "ordered"},
+      "fixedValues": {"insertorder": "ordered", "obkv.testMode": "prefix"},
       "validation": [
         {"rule": "insertorder_must_be_ordered", "message": "prefix 模式强制要求 insertorder=ordered"}
       ]
@@ -103,7 +103,7 @@
       "id": "batch_put",
       "label": "batch_put",
       "isLoad": false,
-      "proportions": {"insertproportion": 1},
+      "proportions": {"batchputproportion": 1},
       "extraFields": [
         {"key": "batchput.size.per.op", "label": "批量大小", "type": "number", "defaultValue": "10"}
       ]
@@ -112,7 +112,7 @@
       "id": "batch_read",
       "label": "batch_read",
       "isLoad": false,
-      "proportions": {"readproportion": 1},
+      "proportions": {"batchreadproportion": 1},
       "extraFields": [
         {"key": "batchread.size.per.op", "label": "批量大小", "type": "number", "defaultValue": "10"}
       ]

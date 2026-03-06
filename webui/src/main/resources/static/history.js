@@ -107,6 +107,7 @@ const History = (() => {
         <div class="btn-row mt-8">
           <button class="btn btn-sm" id="hist-view-log">查看日志</button>
           <button class="btn btn-sm" id="hist-view-result">查看结果</button>
+          <button class="btn btn-sm" id="hist-view-config">查看配置</button>
           <button class="btn btn-sm btn-primary" id="hist-rerun">用此配置重新测试</button>
           <button class="btn btn-sm btn-danger" id="hist-delete">删除记录</button>
         </div>
@@ -116,7 +117,8 @@ const History = (() => {
 
     detail.querySelector('#hist-view-log').addEventListener('click', () => loadLog(record.testId));
     detail.querySelector('#hist-view-result').addEventListener('click', () => loadResult(record.testId));
-    detail.querySelector('#hist-rerun').addEventListener('click', () => rerun(record.testId));
+    detail.querySelector('#hist-view-config').addEventListener('click', () => loadConfig(record.testId));
+    detail.querySelector('#hist-rerun').addEventListener('click', () => rerun(record.testId, record.module));
     detail.querySelector('#hist-delete').addEventListener('click', () => deleteRecord(record.testId));
   }
 
@@ -183,10 +185,50 @@ const History = (() => {
       <tbody>${rows}</tbody></table>`;
   }
 
-  async function rerun(testId) {
+  async function loadConfig(testId) {
+    const content = document.getElementById('hist-detail-content');
+    content.innerHTML = '<p style="color:#8b949e;padding:10px;font-size:12px">加载中…</p>';
+    const res = await fetch(`/api/tests/${testId}/workload`);
+    if (!res.ok) {
+      content.innerHTML = '<p style="color:#8b949e;padding:10px;font-size:12px">暂无配置数据</p>';
+      return;
+    }
+    const text = await res.text();
+    const rows = text.split('\n')
+      .filter(l => l.trim() && !l.trim().startsWith('#'))
+      .map(l => {
+        const eq = l.indexOf('=');
+        if (eq < 0) return null;
+        return [l.substring(0, eq).trim(), l.substring(eq + 1).trim()];
+      })
+      .filter(Boolean);
+    const tableRows = rows.map(([k, v]) =>
+      `<tr><td style="padding:4px 10px 4px 0;color:#8b949e;white-space:nowrap;font-size:12px">${escHtml(k)}</td>`
+      + `<td style="padding:4px 0;font-size:12px;word-break:break-all">${escHtml(v)}</td></tr>`
+    ).join('');
+    content.innerHTML = `
+      <div style="padding:8px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:4px 10px 6px 0;font-size:11px;color:#8b949e;border-bottom:1px solid #30363d">参数</th>
+              <th style="text-align:left;padding:4px 0 6px 0;font-size:11px;color:#8b949e;border-bottom:1px solid #30363d">值</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  async function rerun(testId, module) {
     const res = await fetch(`/api/tests/${testId}/workload`);
     if (!res.ok) { alert('无法获取历史配置'); return; }
     const workload = await res.text();
+    if (module && module !== Config.getActiveModule()) {
+      const sel = document.getElementById('moduleSelect');
+      if (sel) sel.value = module;
+      await Config.switchModule(module, true);
+    }
     document.querySelector('[data-tab="test"]').click();
     await Config.parseWorkloadToForm(workload);
   }

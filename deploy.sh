@@ -116,10 +116,10 @@ cmd_start() {
 
     if $rebuild || [ ! -f "$WEBUI_JAR" ]; then
         check_maven
-        if [ ! -f "$SCRIPT_DIR/obkv-hbase/build/obkv-hbase-0.18.0-SNAPSHOT-jar-with-dependencies.jar" ]; then
+        if $rebuild || [ ! -f "$SCRIPT_DIR/obkv-hbase/build/obkv-hbase-0.18.0-SNAPSHOT-jar-with-dependencies.jar" ]; then
             build_module "obkv-hbase"
         fi
-        if [ ! -f "$SCRIPT_DIR/obkv-table/build/obkv-table-0.18.0-SNAPSHOT-jar-with-dependencies.jar" ]; then
+        if $rebuild || [ ! -f "$SCRIPT_DIR/obkv-table/build/obkv-table-1.0-SNAPSHOT-jar-with-dependencies.jar" ]; then
             build_module "obkv-table"
         fi
         build_webui

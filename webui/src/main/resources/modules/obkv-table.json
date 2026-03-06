@@ -26,28 +26,28 @@
         {"key": "obkv.fullUserName", "label": "测试租户用户名", "type": "text",     "required": true},
         {"key": "obkv.password",     "label": "密码",      "type": "password", "required": true},
         {"key": "obkv.database",     "label": "数据库",    "type": "text",     "required": true, "defaultValue": "test"},
-        {"key": "obkv.table",        "label": "表名",      "type": "text",     "required": true, "defaultValue": "kv_table"}
+        {"key": "table",             "label": "表名",      "type": "text",     "required": true, "defaultValue": "kv_table"}
       ]
     }
   },
 
   "tableModes": [
     {
-      "id": "range",
-      "label": "Range 模式",
+      "id": "default",
+      "label": "默认模式",
       "fields": [],
-      "dbClass": "com.alipay.oceanbase.obkv.ycsb.ObTableClientDB"
+      "dbClass": "com.oceanbase.obkv.table.ycsb.ObTableClientDB"
     },
     {
-      "id": "range_key",
-      "label": "Range-Key 双分区模式",
+      "id": "prefix",
+      "label": "前缀模式",
       "fields": [
-        {"key": "obkv.idCount",                 "label": "ID 数量",         "type": "number", "required": true},
+        {"key": "obkv.prefixCount",             "label": "前缀数量",        "type": "number", "required": true},
         {"key": "obkv.rangePartitionStartTs",   "label": "起始时间戳(ms)",  "type": "number", "required": true},
         {"key": "obkv.rangePartitionDurationMs","label": "分区时长(ms)",    "type": "number", "required": true},
         {"key": "obkv.rangePartitionCount",     "label": "Range 分区数",    "type": "number", "required": true}
       ],
-      "dbClass": "com.alipay.oceanbase.obkv.ycsb.ObTableClientDBRK"
+      "dbClass": "com.oceanbase.obkv.table.ycsb.ObTableClientDBRK"
     }
   ],
 
@@ -58,19 +58,28 @@
       "id": "load",
       "label": "load",
       "isLoad": true,
-      "proportions": {"insertproportion": 1}
+      "proportions": {"insertproportion": 1},
+      "extraFields": [
+        {"key": "obkv.insertType", "label": "写入类型", "type": "select", "options": ["put", "insert", "insertup"], "defaultValue": "put"}
+      ]
     },
     {
       "id": "put",
       "label": "put",
       "isLoad": false,
-      "proportions": {"insertproportion": 1}
+      "proportions": {"insertproportion": 1},
+      "extraFields": [
+        {"key": "obkv.insertType", "label": "写入类型", "type": "select", "options": ["put", "insert", "insertup"], "defaultValue": "put"}
+      ]
     },
     {
       "id": "read",
       "label": "read",
       "isLoad": false,
-      "proportions": {"readproportion": 1}
+      "proportions": {"readproportion": 1},
+      "extraFields": [
+        {"key": "obkv.insertType", "label": "写入类型", "type": "select", "options": ["put", "insert", "insertup"], "defaultValue": "put"}
+      ]
     },
     {
       "id": "scan",
@@ -79,20 +88,38 @@
       "proportions": {"scanproportion": 1},
       "extraFields": [
         {"key": "maxscanlength",          "label": "最大扫描行数", "type": "number", "defaultValue": "1000"},
-        {"key": "scanlengthdistribution", "label": "扫描长度分布", "type": "text",   "defaultValue": "uniform"}
+        {"key": "scanlengthdistribution", "label": "扫描长度分布", "type": "text",   "defaultValue": "uniform"},
+        {"key": "obkv.insertType", "label": "写入类型", "type": "select", "options": ["put", "insert", "insertup"], "defaultValue": "put"}
       ]
     },
     {
       "id": "update",
       "label": "update",
       "isLoad": false,
-      "proportions": {"updateproportion": 1}
+      "proportions": {"updateproportion": 1},
+      "extraFields": [
+        {"key": "obkv.insertType", "label": "写入类型", "type": "select", "options": ["put", "insert", "insertup"], "defaultValue": "put"}
+      ]
     },
     {
-      "id": "read_write",
-      "label": "read_write (50/50)",
+      "id": "batch_put",
+      "label": "batch_put",
       "isLoad": false,
-      "proportions": {"readproportion": 0.5, "updateproportion": 0.5}
+      "proportions": {"batchputproportion": 1},
+      "extraFields": [
+        {"key": "batchput.size.per.op",  "label": "每批次大小", "type": "number", "defaultValue": "10"},
+        {"key": "obkv.insertType", "label": "写入类型", "type": "select", "options": ["put", "insert", "insertup"], "defaultValue": "put"}
+      ]
+    },
+    {
+      "id": "batch_read",
+      "label": "batch_read",
+      "isLoad": false,
+      "proportions": {"batchreadproportion": 1},
+      "extraFields": [
+        {"key": "batchread.size.per.op", "label": "每批次大小", "type": "number", "defaultValue": "10"},
+        {"key": "obkv.insertType", "label": "写入类型", "type": "select", "options": ["put", "insert", "insertup"], "defaultValue": "put"}
+      ]
     }
   ],
 
@@ -106,17 +133,22 @@
     "obkv.fullUserName",
     "obkv.password",
     "obkv.database",
-    "obkv.table",
+    "table",
     "obkv.tableMode",
-    "obkv.idCount",
+    "obkv.prefixCount",
     "obkv.rangePartitionStartTs",
     "obkv.rangePartitionDurationMs",
     "obkv.rangePartitionCount",
     "obkv.maxKey",
     "obkv.debug",
+    "obkv.insertType",
+    "obkv.updateType",
+    "obkv.batchPutType",
     "insertorder",
     "maxscanlength",
     "scanlengthdistribution",
+    "batchput.size.per.op",
+    "batchread.size.per.op",
     "server.connection.pool.size",
     "rpc.operation.timeout",
     "rpc.execute.timeout",

@@ -25,12 +25,8 @@ import java.util.stream.Collectors;
 /**
  * Core service for managing YCSB test processes.
  *
- * Architecture for zero-memory log accumulation:
- *   YCSB stdout → reader thread → output.log (line-buffered, auto-flush)
- *                                      ↓
- *                           tail-follower thread → SseEmitter (Last-Event-ID = byte offset)
- *
- * webui JVM memory stays bounded regardless of test duration or concurrency.
+ * Architecture: YCSB stdout/stderr are redirected directly to output.log (no pipe),
+ * so the child never blocks on write. A tail thread reads output.log and pushes to SSE.
  */
 @Service
 public class TestService {
@@ -42,6 +38,18 @@ public class TestService {
     private static final Pattern OPS_PATTERN    = Pattern.compile("\\[OVERALL\\].*?Operations,\\s*(\\d+)");
     private static final Pattern OP_PATTERN     = Pattern.compile("\\[([A-Z_]+)\\],\\s*([^,]+),\\s*([\\d.]+)");
     private static final Pattern STATUS_PATTERN = Pattern.compile("(\\d+) sec:.*?(\\d+) operations");
+
+    /** No log progress timeout (ms); if process still running and no new log for this long, mark UNKNOWN and send done. */
+    private static final long TAIL_NO_PROGRESS_TIMEOUT_MS = 300_000L;
+    /** Max time between SSE log batch flushes (ms). */
+    private static final long FLUSH_INTERVAL_MS = 200L;
+    /** Max lines per SSE batch; flush immediately when reached. */
+    private static final int MAX_BATCH_LINES = 200;
+    /** For large log files, only replay the last N bytes to avoid overwhelming the client (~2000 lines). */
+    private static final long REPLAY_TAIL_BYTES = 200 * 1024L;
+    /** After process exits, if remaining unread bytes exceed this, skip to last REPLAY_TAIL_BYTES. */
+    private static final long TAIL_FINISH_SKIP_THRESHOLD = 2 * 1024 * 1024L; // 2MB
+
 
     @Value("${webui.runs.dir:webui-runs}")
     private String runsDir;
@@ -138,6 +146,18 @@ public class TestService {
         Path testDir = runsPath.resolve(testId);
         Files.createDirectories(testDir);
 
+        // Validate: obkv-hbase double-partition must use prefix mode
+        if ("obkv-hbase".equals(module)) {
+            java.util.Properties wlProps = new java.util.Properties();
+            wlProps.load(new java.io.StringReader(config.getWorkloadContent()));
+            String rangeCount = wlProps.getProperty("obkv.rangePartitionCount");
+            String testMode   = wlProps.getProperty("obkv.testMode", "default");
+            if (rangeCount != null && !rangeCount.trim().isEmpty()
+                    && !"prefix".equalsIgnoreCase(testMode)) {
+                throw new IllegalArgumentException("二级分区表必须使用 Prefix 模式（obkv.testMode=prefix）");
+            }
+        }
+
         // Write workload.properties
         Path workloadFile = testDir.resolve("workload.properties");
         Files.write(workloadFile, config.getWorkloadContent().getBytes(StandardCharsets.UTF_8));
@@ -160,9 +180,11 @@ public class TestService {
         String workdirStr = "obkv-hbase".equals(module) ? hbaseWorkdir : tableWorkdir;
         File workdir = Paths.get(workdirStr).toAbsolutePath().toFile();
 
+        Path outputLog = testDir.resolve("output.log");
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(workdir);
-        pb.redirectErrorStream(true);  // merge stderr into stdout to prevent pipe deadlock
+        pb.redirectOutput(ProcessBuilder.Redirect.to(outputLog.toFile()));
+        pb.redirectErrorStream(true);
 
         TestRun run = new TestRun(testId, meta);
         Process process = pb.start();
@@ -179,73 +201,112 @@ public class TestService {
 
         activeRuns.put(testId, run);
 
-        // Reader thread: consume stdout line by line → write to output.log
-        Path outputLog = testDir.resolve("output.log");
-        PrintWriter logWriter;
-        try {
-            logWriter = new PrintWriter(new BufferedWriter(new FileWriter(outputLog.toFile(), true)), true);
-        } catch (IOException e) {
-            throw new IOException("Cannot open output.log: " + e.getMessage(), e);
-        }
-
-        Thread readerThread = new Thread(() -> {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    logWriter.println(line);
-                }
-            } catch (IOException e) {
-                String errMsg = "[WEBUI ERROR] Reader thread exception: " + e.getMessage();
-                logWriter.println(errMsg);
-                meta.setStatus("ERROR");
-                try { writeMeta(testDir, meta); } catch (IOException ex) { /* ignore */ }
-                broadcastToEmitters(run, "error", errMsg);
-            } finally {
-                logWriter.close();
+        // When process exits, update meta and remove from active runs (stdout is redirected to file, no getInputStream())
+        Thread exitWatcher = new Thread(() -> {
+            try {
+                process.waitFor();
                 onProcessFinished(run, testDir, meta);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
-        }, "reader-" + testId.substring(0, 8));
-        readerThread.setDaemon(true);
-        run.setReaderThread(readerThread);
-        readerThread.start();
+        }, "exit-watcher-" + testId.substring(0, 8));
+        exitWatcher.setDaemon(true);
+        exitWatcher.start();
 
-        // tail-follower thread: read output.log new lines → push to SSE emitters
+        // tail-follower thread: read output.log new lines → push to SSE emitters (time-batched)
         AtomicInteger snapshotTimer = new AtomicInteger(0);
+        List<String> logBatch = new ArrayList<>(MAX_BATCH_LINES);
         Thread tailThread = new Thread(() -> {
-            try (RandomAccessFile raf = new RandomAccessFile(outputLog.toFile(), "r")) {
-                while (run.isRunning() || raf.getFilePointer() < raf.length()) {
-                    long fileLen = raf.length();
-                    long pos = raf.getFilePointer();
-                    if (pos < fileLen) {
-                        String line = raf.readLine();
-                        if (line != null) {
-                            String decoded = new String(line.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
-                            run.setTailOffset(raf.getFilePointer());
-                            broadcastToEmitters(run, "log", decoded);
-                            // Parse [STATUS] lines for intermediate snapshots
-                            if (decoded.contains("[STATUS]") || decoded.contains("sec:")) {
-                                int count = snapshotTimer.incrementAndGet();
-                                // roughly every 60 lines of status output ≈ 60 seconds
-                                if (count % 60 == 0) {
-                                    tryWriteSnapshot(testDir, run);
+            RandomAccessFile raf = null;
+            try {
+                for (int waitCount = 0; waitCount < 50; waitCount++) {
+                    if (outputLog.toFile().exists()) break;
+                    Thread.sleep(200);
+                }
+                if (outputLog.toFile().exists()) {
+                    raf = new RandomAccessFile(outputLog.toFile(), "r");
+                }
+                if (raf != null) {
+                    try {
+                        long lastProgressMs = System.currentTimeMillis();
+                        long lastFlushMs = System.currentTimeMillis();
+                        long lastHeartbeatMs = System.currentTimeMillis();
+                        boolean didSkipOnExit = false;
+                        while (run.isRunning() || raf.getFilePointer() < raf.length()) {
+                            long fileLen = raf.length();
+                            long pos = raf.getFilePointer();
+                            if (pos < fileLen) {
+                                // Process just exited: if remaining log is huge, jump to tail
+                                if (!run.isRunning() && !didSkipOnExit) {
+                                    didSkipOnExit = true;
+                                    long remaining = fileLen - pos;
+                                    if (remaining > TAIL_FINISH_SKIP_THRESHOLD) {
+                                        if (!logBatch.isEmpty()) {
+                                            flushLogBatch(run, logBatch);
+                                            lastFlushMs = System.currentTimeMillis();
+                                        }
+                                        logBatch.add(String.format(
+                                            "--- [日志截断] 进程已结束，剩余 %dKB 内容过多，跳至末尾 200KB ---",
+                                            remaining / 1024));
+                                        flushLogBatch(run, logBatch);
+                                        lastFlushMs = System.currentTimeMillis();
+                                        raf.seek(fileLen - REPLAY_TAIL_BYTES);
+                                        raf.readLine(); // skip potentially incomplete first line
+                                        continue;
+                                    }
+                                }
+                                String line = raf.readLine();
+                                if (line != null) {
+                                    lastProgressMs = System.currentTimeMillis();
+                                    String decoded = new String(line.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+                                    run.setTailOffset(raf.getFilePointer());
+                                    logBatch.add(decoded);
+                                    if (decoded.contains("[STATUS]") || decoded.contains("sec:")) {
+                                        int count = snapshotTimer.incrementAndGet();
+                                        if (count % 60 == 0) {
+                                            tryWriteSnapshot(testDir, run);
+                                        }
+                                    }
+                                    if (logBatch.size() >= MAX_BATCH_LINES) {
+                                        flushLogBatch(run, logBatch);
+                                        lastFlushMs = System.currentTimeMillis();
+                                    }
+                                }
+                            } else {
+                                long now = System.currentTimeMillis();
+                                if (!logBatch.isEmpty() && now - lastFlushMs >= FLUSH_INTERVAL_MS) {
+                                    flushLogBatch(run, logBatch);
+                                    lastFlushMs = now;
+                                }
+                                if (run.isRunning() && (now - lastProgressMs) > TAIL_NO_PROGRESS_TIMEOUT_MS) {
+                                    log.warn("Test {} no log progress for {}s, marking UNKNOWN", testId, TAIL_NO_PROGRESS_TIMEOUT_MS / 1000);
+                                    onProcessNoProgress(run, testDir, meta);
+                                    break;
+                                }
+                                Thread.sleep(50);
+                                if (System.currentTimeMillis() - lastHeartbeatMs >= 15_000L) {
+                                    sendHeartbeat(run);
+                                    lastHeartbeatMs = System.currentTimeMillis();
                                 }
                             }
                         }
-                    } else {
-                        Thread.sleep(200);
-                        // Send SSE heartbeat every ~15s to keep connection alive
-                        if (System.currentTimeMillis() % 15000 < 200) {
-                            sendHeartbeat(run);
-                        }
+                    } finally {
+                        try { if (raf != null) raf.close(); } catch (IOException e) { /* ignore */ }
                     }
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (FileNotFoundException e) {
-                log.debug("output.log not yet available for {}", testId);
+                log.debug("output.log not available for {} after wait", testId);
             } catch (IOException e) {
                 log.warn("tail-follower error for {}: {}", testId, e.getMessage());
             } finally {
+                if (!logBatch.isEmpty()) flushLogBatch(run, logBatch);
+                // Write result.json before broadcasting done so the frontend can fetch it immediately
+                if (!run.isRunning()) {
+                    try { parseAndWriteResult(testDir); }
+                    catch (IOException e) { log.warn("Failed to write result for {} in tail thread", testId, e); }
+                }
                 broadcastToEmitters(run, "done", "EOF");
                 run.getEmitters().forEach(SseEmitter::complete);
                 run.getEmitters().clear();
@@ -352,6 +413,27 @@ public class TestService {
         log.info("Test {} finished: status={}, duration={}ms", run.getTestId(), meta.getStatus(), durationMs);
     }
 
+    /**
+     * Called when tail sees no log progress for a long time while process is still running (e.g. zombie).
+     * Marks run as UNKNOWN and removes from active runs so the UI can show final state.
+     */
+    private void onProcessNoProgress(TestRun run, Path testDir, RunMeta meta) {
+        long durationMs = (System.nanoTime() - run.getStartNano()) / 1_000_000L;
+        meta.setDurationMs(durationMs);
+        meta.setEndTime(LocalDateTime.now().format(FMT));
+        if (!"STOPPED".equals(meta.getStatus()) && !"ERROR".equals(meta.getStatus())) {
+            meta.setStatus("UNKNOWN");
+        }
+        try {
+            writeMeta(testDir, meta);
+        } catch (IOException e) {
+            log.error("Failed to write meta for {}", run.getTestId(), e);
+        }
+        updateHistoryEntry(meta);
+        activeRuns.remove(run.getTestId());
+        log.warn("Test {} marked UNKNOWN (no log progress)", run.getTestId());
+    }
+
     public void stopTest(String testId) throws IOException {
         TestRun run = activeRuns.get(testId);
         if (run == null) {
@@ -389,8 +471,7 @@ public class TestService {
 
         TestRun run = activeRuns.get(testId);
         if (run != null && run.isRunning()) {
-            // Live test: add emitter and tail-follower will push to it
-            // First replay already-written content from current offset
+            // Live test: replay first, then add emitter so tail and replay never interleave
             long currentOffset = run.getTailOffset();
             if (lastEventId > 0 && lastEventId < currentOffset) {
                 currentOffset = lastEventId;
@@ -398,14 +479,14 @@ public class TestService {
                 currentOffset = 0;
             }
             final long replayFrom = currentOffset;
-            run.addEmitter(emitter);
             emitter.onCompletion(() -> run.removeEmitter(emitter));
             emitter.onTimeout(() -> run.removeEmitter(emitter));
             emitter.onError(e -> run.removeEmitter(emitter));
 
-            if (replayFrom > 0) {
-                sseExecutor.submit(() -> replaySince(emitter, testDir.resolve("output.log"), replayFrom));
-            }
+            sseExecutor.submit(() -> {
+                replaySinceCatchingUp(emitter, testDir.resolve("output.log"), replayFrom, run);
+                run.addEmitter(emitter);
+            });
         } else {
             // Completed test: replay full log
             sseExecutor.submit(() -> {
@@ -428,15 +509,113 @@ public class TestService {
             return;
         }
         try (RandomAccessFile raf = new RandomAccessFile(logFile.toFile(), "r")) {
-            raf.seek(fromOffset);
+            long startPos = fromOffset;
+            if (fromOffset == 0) {
+                long fileLen = raf.length();
+                if (fileLen > REPLAY_TAIL_BYTES) {
+                    startPos = fileLen - REPLAY_TAIL_BYTES;
+                }
+            }
+            raf.seek(startPos);
+            if (startPos > 0) raf.readLine(); // skip potentially incomplete first line
+            List<String> batch = new ArrayList<>(MAX_BATCH_LINES);
             String line;
             while ((line = raf.readLine()) != null) {
-                String decoded = new String(line.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
-                emitter.send(SseEmitter.event().name("log").data(decoded).id(String.valueOf(raf.getFilePointer())));
+                batch.add(new String(line.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8));
+                if (batch.size() >= MAX_BATCH_LINES) {
+                    sendBatchToEmitter(emitter, batch, raf.getFilePointer());
+                    batch.clear();
+                }
+            }
+            if (!batch.isEmpty()) {
+                sendBatchToEmitter(emitter, batch, raf.getFilePointer());
             }
         } catch (IOException e) {
             log.debug("Replay interrupted for {}", logFile, e);
         }
+    }
+
+    /**
+     * Replay log file from fromOffset, stopping when we reach the tail thread's current offset.
+     * The check happens BEFORE reading the next line to avoid duplicate delivery with the tail thread.
+     * Caller adds the emitter to the run only after this returns.
+     */
+    private void replaySinceCatchingUp(SseEmitter emitter, Path logFile, long fromOffset, TestRun run) {
+        if (!Files.exists(logFile)) {
+            return;
+        }
+        try (RandomAccessFile raf = new RandomAccessFile(logFile.toFile(), "r")) {
+            long startPos = fromOffset;
+            if (fromOffset == 0) {
+                long fileLen = raf.length();
+                if (fileLen > REPLAY_TAIL_BYTES) {
+                    startPos = fileLen - REPLAY_TAIL_BYTES;
+                }
+            }
+            raf.seek(startPos);
+            if (startPos > 0) raf.readLine(); // skip potentially incomplete first line
+            List<String> batch = new ArrayList<>(MAX_BATCH_LINES);
+            while (true) {
+                // Check before reading: if we've caught up, hand off to tail thread
+                long tailOff = run.getTailOffset();
+                if (tailOff > 0 && raf.getFilePointer() >= tailOff) {
+                    break;
+                }
+                String line = raf.readLine();
+                if (line == null) break;
+                batch.add(new String(line.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8));
+                if (batch.size() >= MAX_BATCH_LINES) {
+                    try {
+                        sendBatchToEmitter(emitter, batch, raf.getFilePointer());
+                        batch.clear();
+                    } catch (IOException e) {
+                        log.debug("Replay send failed, client may have disconnected");
+                        return;
+                    }
+                }
+            }
+            if (!batch.isEmpty()) {
+                try {
+                    sendBatchToEmitter(emitter, batch, raf.getFilePointer());
+                } catch (IOException e) {
+                    log.debug("Replay send failed, client may have disconnected");
+                }
+            }
+        } catch (IOException e) {
+            log.debug("Replay interrupted for {}", logFile, e);
+        }
+    }
+
+    /** Build a multi-data SSE event from a batch of lines and broadcast to all active emitters. */
+    private void flushLogBatch(TestRun run, List<String> batch) {
+        if (batch.isEmpty()) return;
+        List<SseEmitter> emitters = run.getEmitters();
+        if (!emitters.isEmpty()) {
+            SseEmitter.SseEventBuilder builder = SseEmitter.event().name("log")
+                .id(String.valueOf(run.getTailOffset()));
+            for (String line : batch) {
+                builder.data(line);
+            }
+            List<SseEmitter> toRemove = new ArrayList<>();
+            for (SseEmitter emitter : emitters) {
+                try {
+                    emitter.send(builder);
+                } catch (IOException e) {
+                    toRemove.add(emitter);
+                }
+            }
+            emitters.removeAll(toRemove);
+        }
+        batch.clear();
+    }
+
+    /** Send a batch of lines to a single emitter as one multi-data SSE event. */
+    private void sendBatchToEmitter(SseEmitter emitter, List<String> lines, long offset) throws IOException {
+        SseEmitter.SseEventBuilder builder = SseEmitter.event().name("log").id(String.valueOf(offset));
+        for (String line : lines) {
+            builder.data(line);
+        }
+        emitter.send(builder);
     }
 
     private void broadcastToEmitters(TestRun run, String eventName, String data) {
@@ -471,20 +650,24 @@ public class TestService {
         Path outputLog = testDir.resolve("output.log");
         if (!Files.exists(outputLog)) return;
 
-        List<String> lines = Files.readAllLines(outputLog, StandardCharsets.UTF_8);
-        TestResult result = parseResult(lines);
+        TestResult result;
+        try (BufferedReader reader = Files.newBufferedReader(outputLog, StandardCharsets.UTF_8)) {
+            result = parseResultFromReader(reader);
+        }
         if (result != null) {
             objectMapper.writeValue(testDir.resolve("result.json").toFile(), result);
         }
     }
 
-    private TestResult parseResult(List<String> lines) {
+    /** Parse YCSB output line by line without loading entire file into memory. */
+    private TestResult parseResultFromReader(BufferedReader reader) throws IOException {
         double throughput = 0;
         long runTimeMs = 0;
         long totalOps = 0;
         Map<String, TestResult.OperationResult> ops = new LinkedHashMap<>();
 
-        for (String line : lines) {
+        String line;
+        while ((line = reader.readLine()) != null) {
             Matcher m = OVERALL_PATTERN.matcher(line);
             if (m.find()) throughput = Double.parseDouble(m.group(1));
 
@@ -533,10 +716,11 @@ public class TestService {
         try {
             Path outputLog = testDir.resolve("output.log");
             if (Files.exists(outputLog)) {
-                List<String> lines = Files.readAllLines(outputLog, StandardCharsets.UTF_8);
-                TestResult snap = parseResult(lines);
-                if (snap != null) {
-                    objectMapper.writeValue(testDir.resolve("result_snapshot.json").toFile(), snap);
+                try (BufferedReader reader = Files.newBufferedReader(outputLog, StandardCharsets.UTF_8)) {
+                    TestResult snap = parseResultFromReader(reader);
+                    if (snap != null) {
+                        objectMapper.writeValue(testDir.resolve("result_snapshot.json").toFile(), snap);
+                    }
                 }
             }
         } catch (IOException e) {
@@ -571,22 +755,43 @@ public class TestService {
         Path logFile = runsPath.resolve(testId).resolve("output.log");
         if (!Files.exists(logFile)) return "";
 
-        List<String> lines = Files.readAllLines(logFile, StandardCharsets.UTF_8);
-        int total = lines.size();
+        int totalLines = countLines(logFile);
         int fromLine;
         int toLine;
         if (offset < 0) {
-            // negative offset means from end
-            fromLine = Math.max(0, total + (int) offset);
-            toLine = total;
+            fromLine = Math.max(0, totalLines + (int) offset);
+            toLine = totalLines;
         } else if (offset == 0 && limit <= 0) {
-            fromLine = Math.max(0, total - 2000);
-            toLine = total;
+            fromLine = Math.max(0, totalLines - 2000);
+            toLine = totalLines;
         } else {
-            fromLine = (int) Math.min(offset, total);
-            toLine = Math.min(fromLine + (limit > 0 ? limit : 2000), total);
+            fromLine = (int) Math.min(offset, totalLines);
+            toLine = Math.min(fromLine + (limit > 0 ? limit : 2000), totalLines);
         }
-        return lines.subList(fromLine, toLine).stream().collect(Collectors.joining("\n"));
+        int need = toLine - fromLine;
+        if (need <= 0) return "";
+
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader reader = Files.newBufferedReader(logFile, StandardCharsets.UTF_8)) {
+            int lineNum = 0;
+            String line;
+            while ((line = reader.readLine()) != null && lineNum < toLine) {
+                if (lineNum >= fromLine) {
+                    if (sb.length() > 0) sb.append('\n');
+                    sb.append(line);
+                }
+                lineNum++;
+            }
+        }
+        return sb.toString();
+    }
+
+    private int countLines(Path file) throws IOException {
+        int count = 0;
+        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            while (reader.readLine() != null) count++;
+        }
+        return count;
     }
 
     public String getWorkload(String testId) throws IOException {

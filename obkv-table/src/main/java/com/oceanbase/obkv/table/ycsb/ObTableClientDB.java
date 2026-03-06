@@ -23,8 +23,6 @@ import static site.ycsb.Status.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import com.alipay.oceanbase.rpc.ObTableClient;
-import com.alipay.oceanbase.rpc.mutation.InsertOrUpdate;
-import com.alipay.oceanbase.rpc.get.Get;
 import com.alipay.oceanbase.rpc.property.Property;
 import com.alipay.oceanbase.rpc.mutation.BatchOperation;
 import com.alipay.oceanbase.rpc.mutation.MutationFactory;
@@ -49,21 +47,21 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
     public static final String PROP_KEY_SYS_PASSWORD            = "obkv.sysPassword";
   
     public static final String PROP_KEY_DEBUG                   = "obkv.debug";
-    public static final String PROP_KEY_BATCH_THREAD_COUNT            = "obkv.batch.threadCount";
+    public static final String PROP_KEY_BATCH_THREAD_COUNT      = "obkv.batch.threadCount";
     public static final String PROP_KEY_INSERT_TYPE             = "obkv.insertType";
     public static final String PROP_KEY_UPDATE_TYPE             = "obkv.updateType";
     public static final String PROP_KEY_BATCH_PUT_TYPE          = "obkv.batchPutType";
+    public static final String PROP_KEY_MAX_KEY                 = "obkv.maxKey";
 
     private ObTableClient client = null;
-    private String tableName;
     private boolean debug = false;
-    private boolean isHeapTable = false;
     private int threadCount = 3;
     private ExecutorService executorService;
     private String insertType;
     private String updateType;
     private String batchPutType;
     private int zeropadding;
+    private long maxKey = Long.MAX_VALUE;
 
     @Override
     public void cleanup() throws DBException {
@@ -93,13 +91,13 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             client.setOdpAddr(props.getProperty(PROP_KEY_ODP_ADDR));
             client.setOdpPort(Integer.parseInt(props.getProperty(PROP_KEY_ODP_PORT)));
             client.setDatabase(props.getProperty(PROP_KEY_DATABASE));
-            client.setPassword(props.getProperty(PROP_KEY_PASSWORD));
+            client.setPassword(props.getProperty(PROP_KEY_PASSWORD, ""));
         } else {
             client.setFullUserName(props.getProperty(PROP_KEY_FULL_USER_NAME));
             client.setParamURL(props.getProperty(PROP_KEY_CONFIG_URL));
-            client.setPassword(props.getProperty(PROP_KEY_PASSWORD));
+            client.setPassword(props.getProperty(PROP_KEY_PASSWORD, ""));
             client.setSysUserName(props.getProperty(PROP_KEY_SYS_USER_NAME));
-            client.setSysPassword(props.getProperty(PROP_KEY_SYS_PASSWORD));
+            client.setSysPassword(props.getProperty(PROP_KEY_SYS_PASSWORD, ""));
         }
 
         // Some other useful property
@@ -119,11 +117,27 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             debug = Boolean.parseBoolean(props.getProperty(PROP_KEY_DEBUG));
         }
 
+        // maxKey
+        String maxKeyStr = props.getProperty(PROP_KEY_MAX_KEY);
+        if (maxKeyStr != null && !maxKeyStr.trim().isEmpty()) {
+            try {
+                maxKey = Long.parseLong(maxKeyStr.trim());
+                if (maxKey <= 0) {
+                    throw new DBException("Invalid maxKey configuration: " + PROP_KEY_MAX_KEY +
+                                        " must be greater than 0, got: " + maxKey);
+                }
+            } catch (NumberFormatException e) {
+                throw new DBException("Invalid maxKey configuration: " + PROP_KEY_MAX_KEY +
+                                    " must be a valid long integer, got: " + maxKeyStr, e);
+            }
+        }
+
         if (debug) {
             System.out.println("isOdpMode: " + isOdpMode);
             System.out.println("insertType: " + insertType);
             System.out.println("updateType: " + updateType);
             System.out.println("batchPutType: " + batchPutType);
+            System.out.println("maxKey: " + maxKey);
         }
 
         // thread count
@@ -141,9 +155,30 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             throw new DBException(e.toString());
         }
     }
+
+    /**
+     * 处理默认模式的key，根据maxKey进行取余，确保key在分区范围内
+     * @param coreKey core生成的key
+     * @return 处理后的key
+     */
+    private String processKeyForDefaultMode(String coreKey) {
+        if (maxKey < Long.MAX_VALUE) {
+            try {
+                long keyValue = Long.parseLong(coreKey.trim());
+                keyValue = keyValue % (maxKey + 1);
+                return String.format("%0" + zeropadding + "d", keyValue);
+            } catch (NumberFormatException e) {
+                if (debug) {
+                    System.err.println("Warning: Cannot parse key as number: " + coreKey + ", using original key");
+                }
+                return coreKey;
+            }
+        }
+        return coreKey;
+    }
  
     /**
-     * 读取数据测试，目前无法测试批量读取
+     * 读取数据测试
     * @param table table
     * @param key key
     * @param fields fields
@@ -154,12 +189,13 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
     public Status read(String table, String key, Set<String> fields,
                         Map<String, ByteIterator> result) {
         try {
+            String processedKey = processKeyForDefaultMode(key);
             client.addRowKeyElement(table,new String[]{"ycsb_key"});
             String[] fs = new String[]{};
             if (fields != null) {
                 fs = fields.toArray(new String[]{});
             }
-            Iterator i$ = client.get(table, key, fs).entrySet().iterator();
+            Iterator i$ = client.get(table, processedKey, fs).entrySet().iterator();
             while (i$.hasNext()) {
                 Map.Entry<String, Object> entry = (Map.Entry) i$.next();
                 result.put(entry.getKey(), new StringByteIterator(entry.getValue().toString()));
@@ -173,29 +209,6 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             e.printStackTrace();
             return Status.ERROR;
         }
-    }
-
-    /**
-     * 将零填充的字符串转换为long，加上指定值，再转换回零填充字符串
-     * @param paddedKey 零填充的字符串，如"00000028500000"
-     * @param increment 要加上的值
-     * @param paddingLength 填充长度
-     * @return 转换后的零填充字符串
-     */
-    private String incrementPaddedKey(String paddedKey, long increment, int paddingLength) {
-        long keyNum = Long.parseLong(paddedKey);
-        long newKeyNum = keyNum + increment;
-        return String.format("%0" + paddingLength + "d", newKeyNum);
-    }
-
-    /**
-     * 将零填充的字符串转换为long，加上指定值，再转换回零填充字符串（使用配置的填充长度）
-     * @param paddedKey 零填充的字符串，如"00000028500000"
-     * @param increment 要加上的值
-     * @return 转换后的零填充字符串
-     */
-    private String incrementPaddedKey(String paddedKey, long increment) {
-        return incrementPaddedKey(paddedKey, increment, zeropadding);
     }
  
     /**
@@ -211,10 +224,10 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
                         Vector<HashMap<String, ByteIterator>> result) {
  
         try {
+            String processedKey = processKeyForDefaultMode(startkey);
             client.addRowKeyElement(table,new String[]{"ycsb_key"});
             TableQuery query = client.query(table);
-            String endKey = incrementPaddedKey(startkey, recordcount);
-            query.addScanRange(new Object[] { startkey }, new Object[] { endKey });
+            query.addScanRange(new Object[] { processedKey }, new Object[] { ObObj.getMax() });
             query.limit(recordcount);
             if (fields != null) {
                 query.select(fields.toArray(new String[]{}));
@@ -248,7 +261,8 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
     */
     @Override
     public Status update(String table, String key, Map<String, ByteIterator> values) {
-        Row rowKey  = row(colVal("ycsb_key", key));
+        String processedKey = processKeyForDefaultMode(key);
+        Row rowKey  = row(colVal("ycsb_key", processedKey));
         Row row = row();
         for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
             row.add(entry.getKey(), entry.getValue().toString());
@@ -276,7 +290,8 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
  
      @Override
      public Status insert(String table, String key, Map<String, ByteIterator> values) {
-        Row rowKey  = row(colVal("ycsb_key", key));
+        String processedKey = processKeyForDefaultMode(key);
+        Row rowKey  = row(colVal("ycsb_key", processedKey));
         Row row = row();
         for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
             row.add(entry.getKey(), entry.getValue().toString());
@@ -297,6 +312,7 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             }
         } catch (Exception e) {
             e.printStackTrace();
+            return Status.ERROR;
         }
 
         return OK;
@@ -318,10 +334,11 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
         List<Mutation> mutationList = new ArrayList<>();
         BatchOperation batchOperation = client.batchOperation(table);
         valuesMap.forEach((k, v) -> {
+            String processedKey = processKeyForDefaultMode(k);
             if (debug) {
-                System.out.println("batchPut: {rowKey: " + k + "}");
+                System.out.println("batchPut: {rowKey: " + processedKey + "}");
             }
-            Row rowKey = row(colVal("ycsb_key", k));
+            Row rowKey = row(colVal("ycsb_key", processedKey));
             Row row = row();
             for (Map.Entry<String, ByteIterator> entry : v.entrySet()) {
                 row.add(entry.getKey(), entry.getValue().toString());
@@ -360,7 +377,8 @@ import com.alipay.oceanbase.rpc.protocol.payload.impl.ObObj;
             List<Mutation> mutationList = new ArrayList<>();
             BatchOperation batchOperation = client.batchOperation(table);
             valuesMap.keySet().forEach(key -> {
-                Row rowKey = row(colVal("ycsb_key", key));
+                String processedKey = processKeyForDefaultMode(key);
+                Row rowKey = row(colVal("ycsb_key", processedKey));
                 try {
                     batchOperation.addOperation(MutationFactory.query().setRowKey(rowKey));
                 } catch (Exception e) {

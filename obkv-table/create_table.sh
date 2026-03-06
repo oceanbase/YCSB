@@ -35,11 +35,17 @@ show_help() {
   cat <<'EOF'
 Usage:
   create_table.sh [--mode range] [--fields <field_count>] <num_partitions> <max_key> [key_length]
+  create_table.sh --mode key [--fields <field_count>] <num_partitions>
   create_table.sh --mode key_range [--fields <field_count>] <range_partition_count> <key_subpartition_count> <start_timestamp> <partition_duration_ms>
 
 Modes:
   range (default):
     - Range partitions by ycsb_key (string boundaries with zero padding).
+    - Primary key: ycsb_key
+    - Columns: ycsb_key + field0..field{N-1}
+
+  key:
+    - Key partitions by ycsb_key.
     - Primary key: ycsb_key
     - Columns: ycsb_key + field0..field{N-1}
 
@@ -51,16 +57,19 @@ Modes:
 Options:
   -h, --help        Show this help message
   --fields <N>      Number of non-PK columns (field0..field{N-1}). Default: 1
+  --output_file FILE  Output SQL file path (optional, auto-generated under script dir if not set)
 
 Notes:
   - Table name is always: kv_table
   - This script ALWAYS writes SQL to a generated file (no stdout SQL output):
     - range     : kv_table_range_max<max_key>_p<num_partitions>_len<key_length>_f<field_count>.sql
+    - key       : kv_table_key_p<num_partitions>_f<field_count>.sql
     - key_range : kv_table_r<range_partition_count>_k<key_subpartition_count>_f<field_count>.sql
   - Output files are always written under the obkv-table directory (script directory).
 
 Examples:
   create_table.sh 4 1000
+  create_table.sh --mode key --fields 10 128
   create_table.sh --mode range --fields 10 8 10000 16
   create_table.sh --mode key_range --fields 5 4 3 '2024-01-01 00:00:00' 31536000000
 EOF
@@ -84,6 +93,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --fields)
       FIELD_COUNT="${2:-}"
+      shift 2
+      ;;
+    --output_file)
+      OUTPUT_FILE="$2"
       shift 2
       ;;
     -h|--help)
@@ -340,9 +353,43 @@ create_key_range() {
   output_line ");"
 }
 
+create_key() {
+  if [[ $# -ne 1 ]]; then
+    echo "Usage: create_table.sh --mode key [--fields <field_count>] <num_partitions>" >&2
+    exit 1
+  fi
+
+  local num_partitions="$1"
+
+  if ! [[ "$num_partitions" =~ ^[0-9]+$ ]] || [[ "$num_partitions" -le 0 ]]; then
+    echo "Error: num_partitions must be a positive integer" >&2
+    exit 1
+  fi
+
+  if [[ -z "$OUTPUT_FILE" ]]; then
+    OUTPUT_FILE="${SCRIPT_DIR}/kv_table_key_p${num_partitions}_f${FIELD_COUNT}.sql"
+  fi
+  init_output_file
+
+  emit_header \
+    "num_partitions" "${num_partitions}"
+
+  output_line "CREATE TABLE ${TABLE_NAME} ("
+  output_line "    ycsb_key varbinary(1024) NOT NULL,"
+  if [[ "$FIELD_COUNT" -gt 0 ]]; then
+    emit_field_columns "$FIELD_COUNT" "varbinary(1024)" "true"
+  fi
+  output_line "    PRIMARY KEY (ycsb_key)"
+  output_line ")"
+  output_line "PARTITION BY KEY(ycsb_key) PARTITIONS ${num_partitions};"
+}
+
 case "$MODE" in
   range)
     create_range "$@"
+    ;;
+  key)
+    create_key "$@"
     ;;
   key_range)
     create_key_range "$@"
