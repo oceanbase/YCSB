@@ -84,6 +84,7 @@ java -Xmx256m -jar webui/build/webui-*.jar
 
 ### OBKV HBase
 
+![建表向导](images/create-table.png)
 | 参数 | 说明 |
 |------|------|
 | 表模型 | HBase(KQTV)：标准键值测试；TimeSeries(KTSV)：时间序列测试 |
@@ -91,9 +92,9 @@ java -Xmx256m -jar webui/build/webui-*.jar
 | 列族 | HBase 模型默认 `cf`，TimeSeries 模型默认 `ts_cf` |
 | 分区层级 | 单分区：按 Key 或 Range；双分区：Range + Key（时序场景） |
 
-**单分区参数**：分区类型（range/key）、分区数量、最大 Key（range 时指定）
+**一级分区参数**：分区类型（range/key）、分区数量、最大 Key（range 时指定）
 
-**双分区参数**：起始时间戳(ms)、分区时长(ms)、Range 分区数、Key 子分区数
+**二级分区参数**：起始时间戳(ms)、分区时长(ms)、Range 分区数、Key 子分区数
 
 ### OBKV Table
 
@@ -114,7 +115,7 @@ java -Xmx256m -jar webui/build/webui-*.jar
 ---
 
 ## 4. 性能测试向导
-
+![性能测试向导](images/perf-test.png)
 ### Step 1：连接配置
 
 **ODP 模式**（推荐生产环境）：ODP 地址和端口（默认 2883）
@@ -214,7 +215,7 @@ java -jar obkv-hbase/build/obkv-hbase-*.jar -t -P webui-configs/my-read-test.pro
 ---
 
 ## 6. 历史记录
-
+![历史向导](images/history.png)
 ### 查看历史
 
 切换到「历史记录」Tab，默认加载最近 200 条记录，支持按模块和状态筛选。

@@ -17,14 +17,14 @@
       "fields": [
         {"key": "obkv.configUrl",    "label": "Config url",  "type": "text",     "required": true},
         {"key": "obkv.sysUserName",  "label": "系统租户用户名",  "type": "text",     "required": true},
-        {"key": "obkv.sysPassword",  "label": "系统密码",    "type": "password", "required": true}
+        {"key": "obkv.sysPassword",  "label": "系统租户密码",    "type": "password", "required": true}
       ]
     },
     "common": {
       "fields": [
         {"key": "obkv.odpMode",      "label": "ODP 模式",  "type": "hidden",   "defaultValue": "false"},
         {"key": "obkv.fullUserName", "label": "测试租户用户名", "type": "text",     "required": true},
-        {"key": "obkv.password",     "label": "密码",      "type": "password", "required": true},
+        {"key": "obkv.password",     "label": "测试租户密码",      "type": "password", "required": true},
         {"key": "obkv.database",     "label": "数据库",    "type": "text",     "required": true, "defaultValue": "test"},
         {"key": "table",             "label": "表名",      "type": "text",     "required": true, "defaultValue": "kv_table"}
       ]
