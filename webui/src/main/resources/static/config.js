@@ -8,8 +8,17 @@ const Config = (() => {
   let connMode = 'direct'; // 'direct' or 'odp'
   let currentTestType = null;
   let formChangeCallback = null;
+  /** 递增序号：丢弃过期的模块 fetch 结果，避免快速切换时状态与下拉框错位 */
+  let moduleSwitchSeq = 0;
 
   // ---- Module loading ----
+
+  /** 模块与 descriptor 已就绪后再刷新建表向导（避免与异步 switchModule 竞态） */
+  function refreshTableWizardFields() {
+    if (typeof TableWizard !== 'undefined' && TableWizard.renderCreateFields) {
+      TableWizard.renderCreateFields();
+    }
+  }
 
   async function loadModuleList() {
     const res = await fetch('/api/modules');
@@ -35,18 +44,37 @@ const Config = (() => {
         return;
       }
     }
-    const res = await fetch(`/api/modules/${moduleId}`);
-    moduleDesc = await res.json();
-    currentModule = moduleId;
-    const firstDisplay = moduleDesc.testTypes.find(t => t.id !== 'load') || moduleDesc.testTypes[0];
-    currentTestType = firstDisplay ? firstDisplay.id : (moduleDesc.testTypes[0] ? moduleDesc.testTypes[0].id : null);
-    renderConnFields();
-    renderTableModeFields();
-    renderTestTypeButtons();
-    renderWorkloadFields();
-    const tt = moduleDesc.testTypes && moduleDesc.testTypes.find(t => t.id === currentTestType);
-    if (tt) updateProportionFields(tt);
-    await loadSavedConfigs();
+    const seq = ++moduleSwitchSeq;
+    const prevModule = currentModule;
+    try {
+      const res = await fetch(`/api/modules/${moduleId}`);
+      if (seq !== moduleSwitchSeq) return;
+      if (!res.ok) {
+        const sel = document.getElementById('moduleSelect');
+        if (sel && prevModule != null) sel.value = prevModule;
+        alert('加载模块信息失败：HTTP ' + res.status);
+        return;
+      }
+      const desc = await res.json();
+      if (seq !== moduleSwitchSeq) return;
+
+      moduleDesc = desc;
+      currentModule = moduleId;
+      const firstDisplay = moduleDesc.testTypes.find(t => t.id !== 'load') || moduleDesc.testTypes[0];
+      currentTestType = firstDisplay ? firstDisplay.id : (moduleDesc.testTypes[0] ? moduleDesc.testTypes[0].id : null);
+      renderConnFields();
+      renderTableModeFields();
+      renderTestTypeButtons();
+      renderWorkloadFields();
+      const tt = moduleDesc.testTypes && moduleDesc.testTypes.find(t => t.id === currentTestType);
+      if (tt) updateProportionFields(tt);
+      await loadSavedConfigs().catch(err => console.error('loadSavedConfigs', err));
+      if (seq !== moduleSwitchSeq) return;
+    } finally {
+      if (seq === moduleSwitchSeq) {
+        refreshTableWizardFields();
+      }
+    }
   }
 
   function hasFormContent() {

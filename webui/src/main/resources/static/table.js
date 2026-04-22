@@ -10,10 +10,7 @@ const TableWizard = (() => {
     document.getElementById('testConnBtn').addEventListener('click', testConnection);
     document.getElementById('copySqlBtn').addEventListener('click', copySql);
 
-    // Watch module changes
-    document.getElementById('moduleSelect').addEventListener('change', () => {
-      renderCreateFields();
-    });
+    // 模块切换由 Config.switchModule 异步完成后调用 renderCreateFields，避免读到滞后的 currentModule
     renderCreateFields();
   }
 
