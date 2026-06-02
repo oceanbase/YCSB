@@ -22,7 +22,7 @@
     },
     "common": {
       "fields": [
-        {"key": "obkv.odpMode",      "label": "ODP 模式",  "type": "hidden",   "defaultValue": "false"},
+        {"key": "obkv.isOdpMode",    "label": "ODP 模式",  "type": "hidden",   "defaultValue": "false"},
         {"key": "obkv.fullUserName", "label": "测试租户用户名", "type": "text",     "required": true},
         {"key": "obkv.password",     "label": "测试租户密码",      "type": "password", "required": true},
         {"key": "obkv.database",     "label": "数据库",    "type": "text",     "required": true, "defaultValue": "test"},
@@ -124,7 +124,7 @@
   ],
 
   "knownParams": [
-    "obkv.odpMode",
+    "obkv.isOdpMode",
     "obkv.odpAddr",
     "obkv.odpPort",
     "obkv.configUrl",

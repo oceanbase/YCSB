@@ -56,7 +56,7 @@
 |--------|------|------|------|------|
 | `obkv.isOdpMode` | 连接模式 | boolean | 是 | `true`=ODP 模式，`false`=直连模式 |
 | `obkv.odpAddr` | ODP 代理地址 | string | ODP 模式必填 | |
-| `obkv.odpPort` | ODP 代理端口 | int | ODP 模式必填 | 默认 2883 |
+| `obkv.odpPort` | ODP RPC 端口 | int | ODP 模式必填 | 默认 2883 |
 | `obkv.configUrl` | 直连模式连接 URL | string | 直连模式必填 | |
 | `obkv.sysUserName` | 系统租户用户名 | string | 直连模式必填 | |
 | `obkv.sysPassword` | 系统租户密码 | string | 直连模式必填 | |
