@@ -27,10 +27,20 @@ import org.apache.hadoop.hbase.client.*;
 import org.apache.hadoop.hbase.filter.PageFilter;
 import org.apache.hadoop.hbase.util.Bytes;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.Vector;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import static com.alipay.oceanbase.hbase.constants.OHConstants.*;
 import static site.ycsb.Status.*;
 import static org.apache.commons.lang.StringUtils.isNotBlank;
+import static site.ycsb.workloads.CoreWorkload.TABLENAME_PROPERTY;
+import static site.ycsb.workloads.CoreWorkload.TABLENAME_PROPERTY_DEFAULT;
 
 public class OBHBaseClient extends DB {
     public static final String PROP_TEST_MODE                   = "obkv.testMode";
@@ -43,12 +53,35 @@ public class OBHBaseClient extends DB {
     public static final String PROP_PAGE_FILTER_SIZE            = "obkv.scan.pageFilterSize";
 
     public static final String COLUMN_FAMILY = "hbase.oceanbase.columnFamily";
+    public static final String COLUMN_FAMILY_PROPERTY = "columnfamily";
     public static final String TABLE         = "hbase.oceanbase.table";
     public static final String HBASE_MASTER  = "hbase.master";
     public static final String ZOOKEEPER_QUORUM = "hbase.zookeeper.quorum";
     public static final String ZOOKEEPER_CLIENT_PORT = "hbase.zookeeper.property.clientPort";
     public static final String HBASE_CLIENT_IPC_POOL_SIZE = "hbase.client.ipc.pool.size";
     public static final String USE_PUT_OPTIMIZATION = "hbase.htable.use.put.optimization";
+    /** Number of cell versions per qualifier on insert/update; 1 = single-version put. */
+    public static final String VERSIONS_PER_QUALIFIER = "hbase.versionsPerQualifier";
+    /** Milliseconds between consecutive versions; t_i = T0 - i * versionDeltaMs. */
+    public static final String VERSION_DELTA_MS = "hbase.versionDeltaMs";
+    public static final String VERSION_ANCHOR_TS = "hbase.versionAnchorTs";
+    public static final String VERSION_SPREAD_IN_WINDOW = "hbase.versionSpreadInWindow";
+    public static final String VERSION_WINDOW_MS = "hbase.versionWindowMs";
+    public static final String READ_TIME_RANGE_ENABLED = "hbase.readTimeRangeEnabled";
+    public static final String READ_ANCHOR_TS = "hbase.readAnchorTs";
+    public static final String READ_WINDOW_MS = "hbase.readWindowMs";
+    public static final String READ_MAX_VERSIONS = "hbase.readMaxVersions";
+    public static final String VERIFY_READ_VERSIONS_ENABLED = "hbase.verifyReadVersionsEnabled";
+    public static final String VERIFY_READ_VERSIONS_EXPECTED = "hbase.verifyReadVersionsExpected";
+    public static final String VERIFY_READ_VERSIONS_FIELD_COUNT = "hbase.verifyReadVersionsFieldCount";
+    public static final String HBASE_RPC_TIMEOUT = "hbase.rpc.timeout";
+
+    private static final long DEFAULT_VERSION_WINDOW_MS = 15552000000L;
+    private static final int READ_MAX_VERSIONS_UNSET = 0;
+    private static final AtomicInteger VERIFY_READ_PASS = new AtomicInteger(0);
+    private static final AtomicInteger VERIFY_READ_FAIL = new AtomicInteger(0);
+    private static final AtomicInteger VERIFY_READ_SUMMARY_PRINTED = new AtomicInteger(0);
+
     private String             columnFamily;
     private byte[]             columnFamilyBytes;
     private String             tableName;
@@ -65,6 +98,19 @@ public class OBHBaseClient extends DB {
     private boolean usePageFilter = false;  // 是否使用PageFilter进行scan查询
     private Integer pageFilterSize = null;  // PageFilter的大小，如果为null则使用recordcount
     private boolean isDoublePartition = false;  // 是否为二级分区表
+    private int versionsPerQualifier = 1;
+    private long versionDeltaMs = 0;
+    private long versionAnchorTs = 0;
+    private boolean versionSpreadInWindow = true;
+    private long versionWindowMs = DEFAULT_VERSION_WINDOW_MS;
+    private boolean readTimeRangeEnabled = false;
+    private long readAnchorTs = 0;
+    private long readWindowMs = DEFAULT_VERSION_WINDOW_MS;
+    private int readMaxVersions = READ_MAX_VERSIONS_UNSET;
+    private boolean verifyReadVersionsEnabled = false;
+    private int verifyReadVersionsExpected = 0;
+    private int verifyReadVersionsFieldCount = 10;
+
     @Override
     public void cleanup() throws DBException {
         if (connection != null) {
@@ -74,6 +120,12 @@ public class OBHBaseClient extends DB {
                 throw new DBException(e);
             }
         }
+        if (verifyReadVersionsEnabled && VERIFY_READ_SUMMARY_PRINTED.compareAndSet(0, 1)) {
+            System.out.println("[OBHBaseClient] read version verify summary: pass="
+                + VERIFY_READ_PASS.get() + ", fail=" + VERIFY_READ_FAIL.get()
+                + ", expectedPerQualifier=" + verifyReadVersionsExpected
+                + ", fieldCount=" + verifyReadVersionsFieldCount);
+        }
     }
 
     /**
@@ -81,11 +133,20 @@ public class OBHBaseClient extends DB {
      * @throws DBException exception
      */
     public void init() throws DBException {
-        debug = Boolean.parseBoolean(getProperties().getProperty("obkv.debug", "false"));
-        isObkv = Boolean.parseBoolean(getProperties().getProperty("isObkv", "true"));
-        columnFamily = getProperties().getProperty(COLUMN_FAMILY);
-        tableName = getProperties().getProperty(TABLE);
+        Properties props = getProperties();
+        debug = Boolean.parseBoolean(props.getProperty("obkv.debug", "false"));
+        isObkv = Boolean.parseBoolean(props.getProperty("isObkv", "true"));
+        columnFamily = props.getProperty(COLUMN_FAMILY);
+        if (null == columnFamily || columnFamily.isEmpty()) {
+            columnFamily = props.getProperty(COLUMN_FAMILY_PROPERTY, "v");
+        }
+        tableName = props.getProperty(TABLE);
+        if (null == tableName || tableName.isEmpty()) {
+            tableName = props.getProperty(TABLENAME_PROPERTY, TABLENAME_PROPERTY_DEFAULT);
+        }
         columnFamilyBytes = Bytes.toBytes(columnFamily);
+        initVersionLoadConfig(props);
+        initReadConfig(props);
         
         // 读取测试模式
         testMode = getProperties().getProperty(PROP_TEST_MODE, "default");
@@ -145,7 +206,22 @@ public class OBHBaseClient extends DB {
                 System.out.println("PageFilter size will use recordcount parameter");
             }
         }
+        if (debug && versionsPerQualifier > 1) {
+            System.out.println("  multi-version load: versionsPerQualifier=" + versionsPerQualifier
+                + ", versionDeltaMs=" + versionDeltaMs
+                + ", versionAnchorTs=" + versionAnchorTs
+                + ", versionSpreadInWindow=" + versionSpreadInWindow
+                + ", versionWindowMs=" + versionWindowMs);
+        }
+        if (debug && readTimeRangeEnabled) {
+            System.out.println("  read TimeRange: minTs=" + (readAnchorTs - readWindowMs)
+                + ", maxTs=" + readAnchorTs);
+        }
+        if (debug && readMaxVersions > 0) {
+            System.out.println("  read maxVersions=" + readMaxVersions);
+        }
         Configuration config = HBaseConfiguration.create();
+        applyRpcTimeout(config, props);
         if (isObkv) {
             config.set(ClusterConnection.HBASE_CLIENT_CONNECTION_IMPL, "com.alipay.oceanbase.hbase.util.OHConnectionImpl");
             initObkvConfig(config);
@@ -176,6 +252,7 @@ public class OBHBaseClient extends DB {
                 }
                 System.out.println("Table exists and is accessible");
             }
+            warmupWithRandomGet();
         } catch (IOException e) {
             System.err.println("Error during HBase initialization: " + e.getMessage());
             if (e.getCause() != null) {
@@ -193,6 +270,69 @@ public class OBHBaseClient extends DB {
         }
     }
 
+    /**
+     * Best-effort warmup: one random-key Get after connection setup to prefetch route/table handle.
+     * Runs inside init() (per YCSB thread). NOT_FOUND on an empty table during load is OK.
+     */
+    private void warmupWithRandomGet() {
+        Properties props = getProperties();
+        long recordCount = 0;
+        String recordCountStr = props.getProperty(Client.RECORD_COUNT_PROPERTY, Client.DEFAULT_RECORD_COUNT);
+        try {
+            recordCount = Long.parseLong(recordCountStr.trim());
+        } catch (NumberFormatException e) {
+            return;
+        }
+        if (recordCount <= 0) {
+            return;
+        }
+
+        long insertStart = 0;
+        String insertStartStr = props.getProperty(Workload.INSERT_START_PROPERTY,
+            Workload.INSERT_START_PROPERTY_DEFAULT);
+        try {
+            insertStart = Long.parseLong(insertStartStr.trim());
+        } catch (NumberFormatException e) {
+            insertStart = 0;
+        }
+        if (insertStart >= recordCount) {
+            return;
+        }
+
+        long keynum = insertStart;
+        long keyRange = recordCount - insertStart;
+        if (keyRange > 1) {
+            keynum = insertStart + (long) (ThreadLocalRandom.current().nextDouble() * keyRange);
+            if (keynum >= recordCount) {
+                keynum = recordCount - 1;
+            }
+        }
+
+        String warmupKey = buildWarmupKeyName(keynum);
+        try {
+            String processedKey = processKey(warmupKey);
+            Get g = new Get(Bytes.toBytes(processedKey));
+            g.addFamily(columnFamilyBytes);
+            applyReadGetOptions(g);
+            connection.getTable(TableName.valueOf(tableName)).get(g);
+            if (debug) {
+                System.out.println("Init warmup get ok, key=" + warmupKey + ", processed=" + processedKey);
+            }
+        } catch (Exception e) {
+            if (debug) {
+                System.err.println("Init warmup get ignored: " + e.getMessage());
+            }
+        }
+    }
+
+    private String buildWarmupKeyName(long keynum) {
+        String insertOrder = getProperties().getProperty("insertorder", "hashed");
+        if (!"ordered".equalsIgnoreCase(insertOrder)) {
+            keynum = Utils.hash(keynum);
+        }
+        return String.format("%0" + zeropadding + "d", keynum);
+    }
+
     private void initHBaseConfigAndTestConnectivity(final Configuration config) {
         // 不设置hbase.master，让HBase通过ZooKeeper自动发现
         // config.set("hbase.master", getProperties().getProperty("hbase.master", "127.0.0.1:16000"));
@@ -200,10 +340,16 @@ public class OBHBaseClient extends DB {
         config.set(ZOOKEEPER_CLIENT_PORT, getProperties().getProperty(ZOOKEEPER_CLIENT_PORT, "2181"));
         config.set(HBASE_CLIENT_IPC_POOL_SIZE, getProperties().getProperty(HBASE_CLIENT_IPC_POOL_SIZE, "256"));
 
-        // 添加超时配置，防止卡死
-        config.set("hbase.client.operation.timeout", "10000"); // 10秒操作超时
-        config.set("hbase.client.scanner.timeout.period", "10000"); // 10秒扫描超时
-        config.set("hbase.rpc.timeout", "10000"); // 10秒RPC超时
+        // 添加超时配置，防止卡死（load 大 Put 可通过 hbase.rpc.timeout 覆盖）
+        if (config.get("hbase.client.operation.timeout") == null) {
+            config.set("hbase.client.operation.timeout", "10000");
+        }
+        if (config.get("hbase.client.scanner.timeout.period") == null) {
+            config.set("hbase.client.scanner.timeout.period", "10000");
+        }
+        if (config.get("hbase.rpc.timeout") == null) {
+            config.set("hbase.rpc.timeout", "10000");
+        }
         config.set("hbase.client.retries.number", "1"); // 重试次数
         config.set("hbase.client.pause", "100"); // 重试间隔100ms
 
@@ -320,10 +466,10 @@ public class OBHBaseClient extends DB {
         Properties props = getProperties();
         boolean odpMode = false;
 
-        if (!isNotBlank(props.getProperty(COLUMN_FAMILY))) {
+        if (!isNotBlank(columnFamily)) {
             throw new DBException("columnFamily is blank!");
         }
-        if (!isNotBlank(props.getProperty(TABLE))) {
+        if (!isNotBlank(tableName)) {
             throw new DBException("table is blank!");
         }
         if (!isNotBlank(props.getProperty(HBASE_OCEANBASE_FULL_USER_NAME))) {
@@ -374,6 +520,323 @@ public class OBHBaseClient extends DB {
             if (value != null) {
                 config.set(property.getKey(), value);
             }
+        }
+    }
+
+    private void applyRpcTimeout(Configuration config, Properties props) {
+        String rpcTimeout = props.getProperty(HBASE_RPC_TIMEOUT);
+        if (rpcTimeout != null && !rpcTimeout.trim().isEmpty()) {
+            String timeout = rpcTimeout.trim();
+            config.set("hbase.rpc.timeout", timeout);
+            config.set("hbase.client.operation.timeout", timeout);
+            config.set("hbase.client.scanner.timeout.period", timeout);
+        }
+    }
+
+    private void initReadConfig(Properties props) throws DBException {
+        readTimeRangeEnabled = Boolean.parseBoolean(
+            props.getProperty(READ_TIME_RANGE_ENABLED, "false"));
+
+        String maxVersionsStr = props.getProperty(READ_MAX_VERSIONS);
+        if (maxVersionsStr != null && !maxVersionsStr.trim().isEmpty()) {
+            try {
+                readMaxVersions = Integer.parseInt(maxVersionsStr.trim());
+            } catch (NumberFormatException e) {
+                throw new DBException("Invalid " + READ_MAX_VERSIONS + ": " + maxVersionsStr, e);
+            }
+            if (readMaxVersions <= 0) {
+                throw new DBException(READ_MAX_VERSIONS + " must be greater than 0, got: "
+                    + readMaxVersions);
+            }
+        } else if (readTimeRangeEnabled) {
+            throw new DBException(READ_MAX_VERSIONS + " is required when "
+                + READ_TIME_RANGE_ENABLED + "=true");
+        }
+
+        if (!readTimeRangeEnabled) {
+            initReadVersionVerifyConfig(props);
+            return;
+        }
+
+        String anchorStr = props.getProperty(READ_ANCHOR_TS);
+        if (anchorStr == null || anchorStr.trim().isEmpty()) {
+            anchorStr = props.getProperty(VERSION_ANCHOR_TS);
+        }
+        if (anchorStr == null || anchorStr.trim().isEmpty()) {
+            throw new DBException(READ_ANCHOR_TS + " (or " + VERSION_ANCHOR_TS
+                + ") is required when " + READ_TIME_RANGE_ENABLED + "=true");
+        }
+        try {
+            readAnchorTs = Long.parseLong(anchorStr.trim());
+        } catch (NumberFormatException e) {
+            throw new DBException("Invalid read anchor timestamp: " + anchorStr, e);
+        }
+        if (readAnchorTs <= 0) {
+            throw new DBException(READ_ANCHOR_TS + " must be greater than 0, got: " + readAnchorTs);
+        }
+
+        String windowStr = props.getProperty(READ_WINDOW_MS);
+        if (windowStr != null && !windowStr.trim().isEmpty()) {
+            try {
+                readWindowMs = Long.parseLong(windowStr.trim());
+            } catch (NumberFormatException e) {
+                throw new DBException("Invalid " + READ_WINDOW_MS + ": " + windowStr, e);
+            }
+            if (readWindowMs <= 0) {
+                throw new DBException(READ_WINDOW_MS + " must be greater than 0, got: " + readWindowMs);
+            }
+        } else {
+            readWindowMs = DEFAULT_VERSION_WINDOW_MS;
+        }
+
+        initReadVersionVerifyConfig(props);
+    }
+
+    private void initReadVersionVerifyConfig(Properties props) throws DBException {
+        verifyReadVersionsEnabled = Boolean.parseBoolean(
+            props.getProperty(VERIFY_READ_VERSIONS_ENABLED, "false"));
+        if (!verifyReadVersionsEnabled) {
+            return;
+        }
+
+        String expectedStr = props.getProperty(VERIFY_READ_VERSIONS_EXPECTED);
+        if (expectedStr != null && !expectedStr.trim().isEmpty()) {
+            try {
+                verifyReadVersionsExpected = Integer.parseInt(expectedStr.trim());
+            } catch (NumberFormatException e) {
+                throw new DBException("Invalid " + VERIFY_READ_VERSIONS_EXPECTED + ": " + expectedStr, e);
+            }
+        } else if (versionsPerQualifier > 1) {
+            verifyReadVersionsExpected = versionsPerQualifier;
+        } else {
+            throw new DBException(VERIFY_READ_VERSIONS_EXPECTED + " (or " + VERSIONS_PER_QUALIFIER
+                + " > 1) is required when " + VERIFY_READ_VERSIONS_ENABLED + "=true");
+        }
+        if (verifyReadVersionsExpected <= 0) {
+            throw new DBException(VERIFY_READ_VERSIONS_EXPECTED + " must be > 0, got: "
+                + verifyReadVersionsExpected);
+        }
+
+        String fieldCountStr = props.getProperty(VERIFY_READ_VERSIONS_FIELD_COUNT, "10");
+        try {
+            verifyReadVersionsFieldCount = Integer.parseInt(fieldCountStr.trim());
+        } catch (NumberFormatException e) {
+            throw new DBException("Invalid " + VERIFY_READ_VERSIONS_FIELD_COUNT + ": "
+                + fieldCountStr, e);
+        }
+        if (verifyReadVersionsFieldCount <= 0) {
+            throw new DBException(VERIFY_READ_VERSIONS_FIELD_COUNT + " must be > 0, got: "
+                + verifyReadVersionsFieldCount);
+        }
+    }
+
+    private void initVersionLoadConfig(Properties props) throws DBException {
+        String versionsStr = props.getProperty(VERSIONS_PER_QUALIFIER, "1");
+        try {
+            versionsPerQualifier = Integer.parseInt(versionsStr.trim());
+        } catch (NumberFormatException e) {
+            throw new DBException("Invalid " + VERSIONS_PER_QUALIFIER + ": " + versionsStr, e);
+        }
+        if (versionsPerQualifier <= 0) {
+            throw new DBException(VERSIONS_PER_QUALIFIER + " must be greater than 0, got: "
+                + versionsPerQualifier);
+        }
+        if (versionsPerQualifier == 1) {
+            return;
+        }
+
+        String deltaStr = props.getProperty(VERSION_DELTA_MS);
+        if (deltaStr == null || deltaStr.trim().isEmpty()) {
+            throw new DBException(VERSION_DELTA_MS + " is required when "
+                + VERSIONS_PER_QUALIFIER + " > 1");
+        }
+        try {
+            versionDeltaMs = Long.parseLong(deltaStr.trim());
+        } catch (NumberFormatException e) {
+            throw new DBException("Invalid " + VERSION_DELTA_MS + ": " + deltaStr, e);
+        }
+        if (versionDeltaMs <= 0) {
+            throw new DBException(VERSION_DELTA_MS + " must be greater than 0, got: " + versionDeltaMs);
+        }
+
+        String anchorStr = props.getProperty(VERSION_ANCHOR_TS);
+        if (anchorStr == null || anchorStr.trim().isEmpty()) {
+            throw new DBException(VERSION_ANCHOR_TS + " is required when "
+                + VERSIONS_PER_QUALIFIER + " > 1");
+        }
+        try {
+            versionAnchorTs = Long.parseLong(anchorStr.trim());
+        } catch (NumberFormatException e) {
+            throw new DBException("Invalid " + VERSION_ANCHOR_TS + ": " + anchorStr, e);
+        }
+        if (versionAnchorTs <= 0) {
+            throw new DBException(VERSION_ANCHOR_TS + " must be greater than 0, got: "
+                + versionAnchorTs);
+        }
+
+        versionSpreadInWindow = Boolean.parseBoolean(
+            props.getProperty(VERSION_SPREAD_IN_WINDOW, "true"));
+
+        String windowStr = props.getProperty(VERSION_WINDOW_MS);
+        if (windowStr != null && !windowStr.trim().isEmpty()) {
+            try {
+                versionWindowMs = Long.parseLong(windowStr.trim());
+            } catch (NumberFormatException e) {
+                throw new DBException("Invalid " + VERSION_WINDOW_MS + ": " + windowStr, e);
+            }
+            if (versionWindowMs <= 0) {
+                throw new DBException(VERSION_WINDOW_MS + " must be greater than 0, got: "
+                    + versionWindowMs);
+            }
+        }
+
+        long versionSpanMs = (long) (versionsPerQualifier - 1) * versionDeltaMs;
+        if (versionSpanMs >= versionWindowMs) {
+            throw new DBException("Version span (" + versionSpanMs + " ms) must be less than "
+                + VERSION_WINDOW_MS + " (" + versionWindowMs + " ms)");
+        }
+    }
+
+    private long computeLatestVersionTs(String ycsbKey) {
+        long t0 = versionAnchorTs;
+        if (versionSpreadInWindow) {
+            long spreadOffset = keySpreadOffset(ycsbKey) % versionWindowMs;
+            t0 = versionAnchorTs - spreadOffset;
+        }
+        return t0;
+    }
+
+    private long keySpreadOffset(String key) {
+        int end = key.length();
+        int start = end;
+        while (start > 0 && Character.isDigit(key.charAt(start - 1))) {
+            start--;
+        }
+        if (start < end) {
+            try {
+                return Long.parseLong(key.substring(start));
+            } catch (NumberFormatException e) {
+                // fall through
+            }
+        }
+        try {
+            return Math.abs(Long.parseLong(key.trim()));
+        } catch (NumberFormatException e) {
+            return Math.abs((long) key.hashCode());
+        }
+    }
+
+    private void applyReadGetOptions(Get g) {
+        try {
+            if (readMaxVersions > 0) {
+                g.setMaxVersions(readMaxVersions);
+            }
+            if (readTimeRangeEnabled) {
+                long minTs = readAnchorTs - readWindowMs;
+                g.setTimeRange(minTs, readAnchorTs);
+                if (debug) {
+                    System.out.println("Get TimeRange: minTs=" + minTs + ", maxTs=" + readAnchorTs
+                        + ", maxVersions=" + readMaxVersions);
+                }
+            } else if (debug && readMaxVersions > 0) {
+                System.out.println("Get maxVersions=" + readMaxVersions);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to configure read Get options", e);
+        }
+    }
+
+    /**
+     * One Put per row: all qualifiers and explicit T timestamps in a single RPC.
+     * Multi-version load writes V cells per qualifier (KQTV model).
+     */
+    private Put buildPut(String ycsbKey, Map<String, ByteIterator> values) {
+        String processedKey = processKey(ycsbKey);
+        Put p = new Put(Bytes.toBytes(processedKey));
+
+        if (versionsPerQualifier > 1) {
+            long latestTs = computeLatestVersionTs(ycsbKey);
+            for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
+                byte[] qualifier = Bytes.toBytes(entry.getKey());
+                byte[] value = entry.getValue().toArray();
+                for (int i = 0; i < versionsPerQualifier; i++) {
+                    long ts = latestTs - (long) i * versionDeltaMs;
+                    p.addColumn(columnFamilyBytes, qualifier, ts, value);
+                }
+            }
+            return p;
+        }
+
+        for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
+            if (isDoublePartition) {
+                long timestamp = generateTimestampForDoublePartition(ycsbKey);
+                p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), timestamp,
+                    entry.getValue().toArray());
+            } else {
+                p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()),
+                    entry.getValue().toArray());
+            }
+        }
+        return p;
+    }
+
+    private Status verifyReadVersionCounts(String key, Result r, Set<String> fields) {
+        Map<String, Integer> versionCounts = new HashMap<String, Integer>();
+        List<Cell> cells = r.listCells();
+        if (null == cells) {
+            logVerifyFailure(key, versionCounts);
+            VERIFY_READ_FAIL.incrementAndGet();
+            return Status.UNEXPECTED_STATE;
+        }
+        int i = 0;
+        for (; i < cells.size(); ++i) {
+            Cell cell = cells.get(i);
+            if (!Bytes.equals(columnFamilyBytes, CellUtil.cloneFamily(cell))) {
+                continue;
+            }
+            String qualifier = Bytes.toString(CellUtil.cloneQualifier(cell));
+            Integer cnt = versionCounts.get(qualifier);
+            if (null == cnt) {
+                versionCounts.put(qualifier, 1);
+            } else {
+                versionCounts.put(qualifier, cnt + 1);
+            }
+        }
+
+        if (null != fields && !fields.isEmpty()) {
+            for (String field : fields) {
+                Integer cnt = versionCounts.get(field);
+                if (null == cnt || cnt.intValue() != verifyReadVersionsExpected) {
+                    logVerifyFailure(key, versionCounts);
+                    VERIFY_READ_FAIL.incrementAndGet();
+                    return Status.UNEXPECTED_STATE;
+                }
+            }
+        } else {
+            if (versionCounts.size() != verifyReadVersionsFieldCount) {
+                logVerifyFailure(key, versionCounts);
+                VERIFY_READ_FAIL.incrementAndGet();
+                return Status.UNEXPECTED_STATE;
+            }
+            for (Map.Entry<String, Integer> entry : versionCounts.entrySet()) {
+                if (entry.getValue().intValue() != verifyReadVersionsExpected) {
+                    logVerifyFailure(key, versionCounts);
+                    VERIFY_READ_FAIL.incrementAndGet();
+                    return Status.UNEXPECTED_STATE;
+                }
+            }
+        }
+
+        VERIFY_READ_PASS.incrementAndGet();
+        return OK;
+    }
+
+    private void logVerifyFailure(String key, Map<String, Integer> versionCounts) {
+        if (debug || VERIFY_READ_FAIL.get() < 5) {
+            System.err.println("[OBHBaseClient] read version verify failed: key=" + key
+                + ", expectedPerQualifier=" + verifyReadVersionsExpected
+                + ", fieldCount=" + verifyReadVersionsFieldCount
+                + ", actual=" + versionCounts);
         }
     }
 
@@ -522,12 +985,19 @@ public class OBHBaseClient extends DB {
                     g.addColumn(columnFamilyBytes, Bytes.toBytes(field));
                 }
             }
+            applyReadGetOptions(g);
             r = connection.getTable(TableName.valueOf(tableName)).get(g);
             if (r == null || r.isEmpty()) {
                 if (debug) {
                     System.out.println("Result is empty, key=" + processedKey);
                 }
                 return Status.NOT_FOUND;
+            }
+            if (verifyReadVersionsEnabled) {
+                Status verifyStatus = verifyReadVersionCounts(key, r, fields);
+                if (OK != verifyStatus) {
+                    return verifyStatus;
+                }
             }
         } catch (Exception e) {
             IOException ioException = (e instanceof IOException) ? (IOException) e : new IOException("Error in read", e);
@@ -537,8 +1007,12 @@ public class OBHBaseClient extends DB {
         }
         while (r.advance()) {
             final Cell cell = r.current();
-            result.put(Bytes.toString(CellUtil.cloneQualifier(cell)), 
-                      new ByteArrayByteIterator(CellUtil.cloneValue(cell)));
+            String qualifier = Bytes.toString(CellUtil.cloneQualifier(cell));
+            // Newest version first; keep first per qualifier for YCSB.
+            if (result.containsKey(qualifier)) {
+                continue;
+            }
+            result.put(qualifier, new ByteArrayByteIterator(CellUtil.cloneValue(cell)));
             if (debug) {
                 System.out.println("Result for field: " + Bytes.toString(CellUtil.cloneQualifier(cell))
                                    + " is: " + Bytes.toString(CellUtil.cloneValue(cell)));
@@ -667,27 +1141,12 @@ public class OBHBaseClient extends DB {
      */
     @Override
     public Status update(String table, String key, Map<String, ByteIterator> values) {
-        String processedKey = processKey(key);
-        
         if (debug) {
             System.out.println("Setting up put for key: " + key);
-            System.out.println("Processed key: " + processedKey);
+            System.out.println("Processed key: " + processKey(key));
         }
-        
-        Put p = new Put(Bytes.toBytes(processedKey));
-        for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
-            if (debug) {
-                System.out.println("Adding field/value " + entry.getKey() + "/" + entry.getValue()
-                                   + " to put request");
-            }
-            
-            if (isDoublePartition) {
-                long timestamp = generateTimestampForDoublePartition(key);
-                p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), timestamp, entry.getValue().toArray());
-            } else {
-                p.addColumn(columnFamilyBytes, Bytes.toBytes(entry.getKey()), entry.getValue().toArray());
-            }
-        }
+
+        Put p = buildPut(key, values);
         try {
             connection.getTable(TableName.valueOf(tableName)).put(p);
             if (debug) {
@@ -737,20 +1196,7 @@ public class OBHBaseClient extends DB {
     public Status batchPut(String table, Map<String, Map<String, ByteIterator>> valuesMap) {
         List<Put> putList = new ArrayList<>();
         valuesMap.forEach((key, values) -> {
-            String processedKey = processKey(key);
-            
-            Put put = new Put(processedKey.getBytes());
-            values.forEach((k, v) -> {
-                // 判断是否需要指定时间戳（仅二级分区表的前缀模式）
-                boolean needTimestamp = testMode.equals("prefix") && partitionCount > 0 && partitionDurationMs > 0;
-                if (needTimestamp) {
-                    long timestamp = generateTimestampForDoublePartition(key);
-                    put.addColumn(columnFamilyBytes, k.getBytes(), timestamp, v.toArray());
-                } else {
-                    put.addColumn(columnFamilyBytes, k.getBytes(), v.toArray());
-                }
-            });
-            putList.add(put);
+            putList.add(buildPut(key, values));
         });
         try {
             connection.getTable(TableName.valueOf(tableName)).put(putList);
@@ -783,6 +1229,7 @@ public class OBHBaseClient extends DB {
                     get.addColumn(columnFamilyBytes, Bytes.toBytes(field));
                 }
             }
+            applyReadGetOptions(get);
             getList.add(get);
         });
         try {
@@ -802,11 +1249,20 @@ public class OBHBaseClient extends DB {
                     continue;
                 }
                 String originalKey = originalKeys.get(i);
+                if (verifyReadVersionsEnabled) {
+                    Status verifyStatus = verifyReadVersionCounts(originalKey, res[i], fields);
+                    if (OK != verifyStatus) {
+                        return verifyStatus;
+                    }
+                }
                 Map<String, ByteIterator> result = new HashMap<>();
                 while (res[i].advance()) {
                     final Cell c = res[i].current();
-                    result.put(Bytes.toString(CellUtil.cloneQualifier(c)),
-                            new ByteArrayByteIterator(CellUtil.cloneValue(c)));
+                    String qualifier = Bytes.toString(CellUtil.cloneQualifier(c));
+                    if (result.containsKey(qualifier)) {
+                        continue;
+                    }
+                    result.put(qualifier, new ByteArrayByteIterator(CellUtil.cloneValue(c)));
                     if (debug) {
                         System.out.println(
                                 "Result for key: " + originalKey + ", field: " + Bytes.toString(CellUtil.cloneQualifier(c))

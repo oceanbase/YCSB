@@ -1,0 +1,72 @@
+# OBKV-HBase workload — KQTV multi-version table (same model as native HBase YCSB).
+# Scale / table / V / load|read mode via CLI (-p).
+#
+# Required on every run:
+#   -p recordcount=<N> -p operationcount=<N> -p table=<table_name>
+# Load (-load):
+#   -p insertproportion=1 -p readproportion=0
+#   -p hbase.versionsPerQualifier=<V> -p hbase.versionDeltaMs=1000
+# Read:
+#   -p insertproportion=0 -p readproportion=1
+#   -p updateproportion=0 -p scanproportion=0
+#
+# Fill OB connection properties below before running (<placeholder> = replace with your env).
+
+workload=site.ycsb.workloads.CoreWorkload
+
+fieldcount=10
+fieldlength=20
+zeropadding=20
+
+insertorder=ordered
+requestdistribution=uniform
+
+columnfamily=v
+
+# OBKV connection — direct (default) or ODP (CLI override for ODP run):
+# Direct: odpMode=false + paramURL + sysUserName
+# ODP:    odpMode=true + odpAddr + odpPort (no paramURL)
+isObkv=true
+hbase.oceanbase.odpMode=false
+hbase.oceanbase.odpAddr=<odp_host>
+hbase.oceanbase.odpPort=2885
+hbase.oceanbase.paramURL=http://<ocp_host>8080/services?User_ID=alibaba&UID=test&Action=ObRootServiceInfo&<cluster_name>&database=<database>
+hbase.oceanbase.sysUserName=<sys_user>
+hbase.oceanbase.sysPassword=
+hbase.oceanbase.fullUserName=<user>@<tenant>#<cluster>
+hbase.oceanbase.password=
+hbase.oceanbase.database=test
+hbase.oceanbase.table=ycsb_bench
+hbase.oceanbase.columnFamily=v
+
+# Fixed 180-day window anchor T₀ (2026-06-12 00:00:00 +08) — same as native HBase runbooks
+hbase.versionAnchorTs=1781193600000
+hbase.versionSpreadInWindow=true
+hbase.versionWindowMs=15552000000
+
+# Pure-read Get options (same window as load)
+hbase.readTimeRangeEnabled=true
+hbase.readAnchorTs=1781193600000
+hbase.readWindowMs=15552000000
+hbase.readMaxVersions=2000
+
+# Stable load (align with hbase094 runbooks)
+batchput.size.per.op=1
+clientbuffering=false
+hbase.rpc.timeout=180000
+core_workload_insertion_retry_limit=5
+core_workload_insertion_retry_interval=3
+
+# Optional read smoke:
+#   -p hbase.verifyReadVersionsEnabled=true
+#   -p hbase.verifyReadVersionsExpected=50
+
+obkv.debug=false
+
+# ========== 其他配置 ==========
+#### 连接数配置 ####
+server.connection.pool.size=20
+#### 查询超时参数 ####
+rpc.operation.timeout=200000
+rpc.execute.timeout=200000
+hbase.rpc.shortoperation.timeout=200000

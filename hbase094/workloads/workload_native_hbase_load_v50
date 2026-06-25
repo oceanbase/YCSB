@@ -1,0 +1,7 @@
+# DEPRECATED — use workload_native_hbase + CLI -p (see hbase094/README.md).
+#
+# Example:
+#   java -jar ... -load -P workloads/workload_native_hbase -threads 96 \
+#     -p insertproportion=1 -p readproportion=0 \
+#     -p recordcount=25770000 -p operationcount=25770000 -p table=ycsb_bench \
+#     -p batchput.size.per.op=1 -p hbase.versionsPerQualifier=50 -p hbase.versionDeltaMs=1000

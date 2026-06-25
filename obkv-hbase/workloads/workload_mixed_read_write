@@ -1,0 +1,60 @@
+# 7:3 mixed read/write — single-row Get + single-row Put (NOT multi-version load).
+# Run: -t with recordcount=15000000, operationcount=0, maxexecutiontime=1800
+# Do NOT set hbase.versionsPerQualifier on mixed runs (default 1).
+
+workload=site.ycsb.workloads.CoreWorkload
+
+fieldcount=10
+fieldlength=20
+zeropadding=20
+
+insertorder=ordered
+requestdistribution=uniform
+columnfamily=v
+
+readproportion=0.7
+updateproportion=0.3
+insertproportion=0
+scanproportion=0
+readmodifywriteproportion=0
+batchputproportion=0
+batchreadproportion=0
+
+recordcount=15000000
+operationcount=0
+maxexecutiontime=1800
+
+# OBKV connection — fill before running (see workload_obkv_native_hbase)
+isObkv=true
+hbase.oceanbase.odpMode=false
+hbase.oceanbase.paramURL=http://<ocp_host>8080/services?User_ID=alibaba&UID=test&Action=ObRootServiceInfo&<cluster_name>&database=<database>
+hbase.oceanbase.sysUserName=<sys_user>
+hbase.oceanbase.sysPassword=
+hbase.oceanbase.fullUserName=<user>@<tenant>#<cluster>
+hbase.oceanbase.password=
+hbase.oceanbase.database=test
+hbase.oceanbase.table=ycsb_bench
+hbase.oceanbase.columnFamily=v
+
+# Load anchor (read falls back to versionAnchorTs if readAnchorTs unset)
+hbase.versionAnchorTs=1781193600000
+hbase.versionWindowMs=15552000000
+
+# Pure-read Get: 180-day TimeRange + maxVersions=2000 (same as pure-read matrix)
+hbase.readTimeRangeEnabled=true
+hbase.readAnchorTs=1781193600000
+hbase.readWindowMs=15552000000
+hbase.readMaxVersions=2000
+readallfields=true
+
+# Mixed write: single version per Put (do NOT set hbase.versionsPerQualifier=50)
+
+batchput.size.per.op=1
+clientbuffering=false
+hbase.rpc.timeout=180000
+
+obkv.debug=false
+server.connection.pool.size=20
+rpc.operation.timeout=200000
+rpc.execute.timeout=200000
+hbase.rpc.shortoperation.timeout=200000

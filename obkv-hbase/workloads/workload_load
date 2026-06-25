@@ -54,15 +54,15 @@ threadcount=10
 hbase.oceanbase.odpMode=false
 
 ##### ODP模式必填 #####
-hbase.oceanbase.odpAddr=
+hbase.oceanbase.odpAddr=<odp_host>
 hbase.oceanbase.odpPort=
 
 ##### 直连模式必填 #####
-hbase.oceanbase.paramURL=
-hbase.oceanbase.sysUserName=
+hbase.oceanbase.paramURL=http://<ocp_host>8080/services?User_ID=alibaba&UID=test&Action=ObRootServiceInfo&<cluster_name>&database=<database>
+hbase.oceanbase.sysUserName=<sys_user>
 hbase.oceanbase.sysPassword=
 ##### 账户密码 #####
-hbase.oceanbase.fullUserName=
+hbase.oceanbase.fullUserName=<user>@<tenant>#<cluster>
 hbase.oceanbase.password=
 hbase.oceanbase.database=test
 

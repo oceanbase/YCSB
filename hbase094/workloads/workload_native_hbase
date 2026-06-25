@@ -1,0 +1,51 @@
+# Generic native HBase 0.94 workload — scale / table / V / load|read mode via CLI (-p).
+# See hbase094/README.md. Fill ZK / hbase.master below (<placeholder> = your env).
+#
+# Required on every run (examples):
+#   -p recordcount=<N> -p operationcount=<N> -p table=<table_name>
+# Load (-load):
+#   -p insertproportion=1 -p readproportion=0
+#   -p hbase.versionsPerQualifier=<V> -p hbase.versionDeltaMs=1000
+# Read:
+#   -p insertproportion=0 -p readproportion=1
+#   -p updateproportion=0 -p scanproportion=0
+#   (-threads <N> on CLI; major_compact before each read tier per runbook)
+
+workload=site.ycsb.workloads.CoreWorkload
+
+fieldcount=10
+fieldlength=20
+zeropadding=20
+
+insertorder=ordered
+requestdistribution=uniform
+
+columnfamily=v
+
+hbase.zookeeper.quorum=<zk_host1>,<zk_host2>,<zk_host3>
+hbase.zookeeper.property.clientPort=2181
+hbase.master=<hmaster_host>:60000
+
+# Fixed 180-day window anchor T₀ (2026-06-12 00:00:00 +08)
+hbase.versionAnchorTs=1781193600000
+hbase.versionSpreadInWindow=true
+hbase.versionWindowMs=15552000000
+
+# Pure-read Get options (same window as load)
+hbase.readTimeRangeEnabled=true
+hbase.readAnchorTs=1781193600000
+hbase.readWindowMs=15552000000
+hbase.readMaxVersions=2000
+
+# Optional read smoke: -p hbase.verifyReadVersionsEnabled=true
+#   -p hbase.verifyReadVersionsExpected=50 -p hbase.verifyReadVersionsFieldCount=10
+# Default off; does not affect benchmark runs unless explicitly enabled.
+
+# Stable load:
+batchput.size.per.op=1
+clientbuffering=false
+hbase.rpc.timeout=180000
+core_workload_insertion_retry_limit=5
+core_workload_insertion_retry_interval=3
+
+debug=false

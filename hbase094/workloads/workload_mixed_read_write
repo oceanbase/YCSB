@@ -1,0 +1,58 @@
+# DEPRECATED for native HBase 0.94 mixed runs — use workload_native_hbase + CLI (see below).
+# Read path MUST match pure-read: same file as workload_native_hbase, only proportions differ.
+#
+# HBase mixed 7:3 example (-t):
+#   -P workload_native_hbase -threads 96 -s \
+#   -p insertproportion=0 -p readproportion=0.7 -p updateproportion=0.3 \
+#   -p scanproportion=0 -p readmodifywriteproportion=0 \
+#   -p recordcount=<N> -p operationcount=0 -p maxexecutiontime=1800 \
+#   -p insertorder=ordered -p table=ycsb_bench
+# Do NOT set hbase.versionsPerQualifier on mixed (write = single-version Put).
+#
+# This file is kept for legacy scripts; read/Get options below mirror workload_native_hbase.
+
+workload=site.ycsb.workloads.CoreWorkload
+
+fieldcount=10
+fieldlength=20
+zeropadding=20
+
+insertorder=ordered
+requestdistribution=uniform
+columnfamily=v
+
+readproportion=0.7
+updateproportion=0.3
+insertproportion=0
+scanproportion=0
+readmodifywriteproportion=0
+batchputproportion=0
+batchreadproportion=0
+
+recordcount=15000000
+operationcount=0
+maxexecutiontime=1800
+
+hbase.zookeeper.quorum=<zk_host1>,<zk_host2>,<zk_host3>
+hbase.zookeeper.property.clientPort=2181
+hbase.master=<hmaster_host>:60000
+
+# Load anchor (load-only; mixed write does not use multi-version put)
+hbase.versionAnchorTs=1781193600000
+hbase.versionSpreadInWindow=true
+hbase.versionWindowMs=15552000000
+
+# Pure-read Get options (identical to workload_native_hbase — 180d TimeRange, maxVersions=2000)
+hbase.readTimeRangeEnabled=true
+hbase.readAnchorTs=1781193600000
+hbase.readWindowMs=15552000000
+hbase.readMaxVersions=2000
+readallfields=true
+
+batchput.size.per.op=1
+clientbuffering=false
+hbase.rpc.timeout=180000
+core_workload_insertion_retry_limit=5
+core_workload_insertion_retry_interval=3
+
+debug=false
